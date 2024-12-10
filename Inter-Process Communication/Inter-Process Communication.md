@@ -684,4 +684,1079 @@ class parent_task
 };
 ```
 
+接下来讨论第四种情况：管道的读端被关闭，而写端仍保持正常。从逻辑上看，系统应该会阻止写端继续写入数据，因为读端已经不存在，写入操作也就失去了意义。关键在于，系统究竟会通过何种方式来阻止写入？
+
+实际上，当管道的读端被关闭后，如果写端尝试写入数据，系统会直接终止对应的进程。这种处理方式表明写入操作被视为一种不可恢复的错误。以下是测试代码的具体表现，让我们深入探讨它的行为。
+
+至于系统如何终止写端进程，实际上也是通过进程间通信实现的。系统作为特殊的进程，会向尝试写入的进程发送一个特定的信号（如 `SIGPIPE`），导致该进程异常终止。这意味着写入操作不仅被禁止，而且会触发严重的错误处理机制。
+
+```shell
+[wind@starry-sky pipe]$ kill -l
+1) SIGHUP	 2) SIGINT	 3) SIGQUIT	 4) SIGILL	 5) SIGTRAP
+6) SIGABRT	 7) SIGBUS	 8) SIGFPE	 9) SIGKILL	10) SIGUSR1
+11) SIGSEGV	12) SIGUSR2	13) SIGPIPE	14) SIGALRM	15) SIGTERM
+16) SIGSTKFLT	17) SIGCHLD	18) SIGCONT	19) SIGSTOP	20) SIGTSTP
+21) SIGTTIN	22) SIGTTOU	23) SIGURG	24) SIGXCPU	25) SIGXFSZ
+26) SIGVTALRM	27) SIGPROF	28) SIGWINCH	29) SIGIO	30) SIGPWR
+31) SIGSYS	34) SIGRTMIN	35) SIGRTMIN+1	36) SIGRTMIN+2	37) SIGRTMIN+3
+38) SIGRTMIN+4	39) SIGRTMIN+5	40) SIGRTMIN+6	41) SIGRTMIN+7	42) SIGRTMIN+8
+43) SIGRTMIN+9	44) SIGRTMIN+10	45) SIGRTMIN+11	46) SIGRTMIN+12	47) SIGRTMIN+13
+48) SIGRTMIN+14	49) SIGRTMIN+15	50) SIGRTMAX-14	51) SIGRTMAX-13	52) SIGRTMAX-12
+53) SIGRTMAX-11	54) SIGRTMAX-10	55) SIGRTMAX-9	56) SIGRTMAX-8	57) SIGRTMAX-7
+58) SIGRTMAX-6	59) SIGRTMAX-5	60) SIGRTMAX-4	61) SIGRTMAX-3	62) SIGRTMAX-2
+63) SIGRTMAX-1	64) SIGRTMAX	
+[wind@starry-sky pipe]$
+```
+
+在下面的代码中，我们先让读写端通信一次，然后读端关闭，然后查看父进程的等待结果。
+
+```cpp
+// 父进程任务集
+class parent_task
+{
+    public:
+    // 父进程执行流
+    void operator()(int arr[2], int id)
+    {
+        close(arr[1]);
+        const int& read_fd = arr[0];
+        char buffer[BUFFER_SIZE];  // 用户缓冲区
+
+        // 读取信息
+        int loop_counter = 1;
+        while(1)
+        {
+            buffer[0] = 0;
+            ssize_t end = read(read_fd, buffer, sizeof(buffer) - 1);
+
+            // // 查看read的返回情况
+            // cout<<end<<endl;
+
+            // 异常处理
+            if(end > 0)
+            {
+                buffer[end] = 0;
+                // cout<<buffer<<"  "<<loop_counter<<endl;
+                cout<<buffer<<endl;
+            }
+            else if(end == 0)
+            {
+                // 写端已经关闭，通信结束
+                break;
+            }
+            else
+            {
+                // 未知错误，也跳出循环
+                break;
+            }
+
+            sleep(6);
+
+            close(read_fd);
+
+            cout<<"The read end has been closed."<<endl; // 读端已经关闭
+            break;
+
+            // // loop_counter+=2;
+            // // loop_counter++;
+        }
+
+        sleep(8);  // 创建一个窗口期观察子进程的僵死状态
+        int status = 0;
+        pid_t i = waitpid(id, &status, 0);
+
+        // 在ProcessWaiting.md中对waitpid的使用和返回有详细介绍
+        if(WIFEXITED(status))
+        {
+            printf("Normal exit, code : %d\n", WEXITSTATUS(status));
+        }
+        else
+        {
+            printf("Exception Interrupt, code : %d\n", status & 0x7f);
+        }
+        exit(0);
+    }
+};
+
+// 子进程任务集
+class child_task
+{
+    public:
+    // 子进程执行流
+    void operator()(int arr[2])
+    {
+        close(arr[0]);
+        const int& write_fd = arr[1];
+        char buffer[BUFFER_SIZE];  // 用户缓冲区
+
+        // 发出信息
+        int count = 1;
+        while(count)
+        {
+            // 生成一条信息
+            // buffer[0] = 0; // 在C/C++中字符串结尾为'\0'，此处暗示该缓冲区是字符串的载体
+            // pid_t id = getpid();
+            // snprintf(buffer, sizeof(buffer), "%s:: pid:%d count:%d", "Here is the child process", id, count);
+            snprintf(buffer, sizeof(buffer), "%s", "c");
+
+            // 将信息写到管道中
+            write(write_fd, buffer, strlen(buffer));
+
+            sleep(10);
+            cout<<"The write end is preparing for the next write operation."<<endl; // 写段准备下一次写入
+
+            // cout<<count<<endl;
+
+            // if(count == 65536)
+            // {
+            //     cout<<"ready"<<endl;
+            // }
+            // else if(count > 65536)
+            // {
+            //     cout<<"go"<<endl;
+            // }
+
+            if(count == 5)
+                break;
+
+            count++;
+            sleep(1);
+            // cout<<buffer<<endl;  检查
+        }
+
+        exit(0);
+    }
+};
+```
+
+执行之后
+
+```shell
+[wind@starry-sky pipe]$ make clean ; make
+[wind@starry-sky pipe]$ ./testPipe
+c
+The read end has been closed.
+The write end is preparing for the next write operation.
+Exception Interrupt, code : 13
+[wind@starry-sky pipe]$
+```
+
+也就是这个信号是`SIGPIPE`。
+
+接下来我们创建一个监控脚本来查看父子进程的状态。
+
+```shell
+[wind@starry-sky pipe]$ while : ; do ps ajx | head -1 ; ps ajx | grep testPipe | grep -v grep; sleep 1;  done
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 Z+    1002   0:00 [testPipe] <defunct>
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 Z+    1002   0:00 [testPipe] <defunct>
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701   929   929 29701 pts/0      929 S+    1002   0:00 ./testPipe
+  929   930   929 29701 pts/0      929 Z+    1002   0:00 [testPipe] <defunct>
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+^C
+[wind@starry-sky pipe]$
+```
+
+### Application
+
+下面我们来说说管道的应用场景。一是`shell`中的管道操作，下面我们找个无关紧要的指令，把它们用管道串联起来。
+
+我们在一个窗口上执行`sleep 6194 | sleep 1024 | sleep 4096`，然后在另一个窗口上监控一下。
+
+```shell
+[wind@starry-sky pipe]$ ps ajx | head -1 ; ps ajx | grep sleep | grep -v grep
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+29701  2193  2193 29701 pts/0     2193 S+    1002   0:00 sleep 6194
+29701  2194  2193 29701 pts/0     2193 S+    1002   0:00 sleep 1024
+29701  2195  2193 29701 pts/0     2193 S+    1002   0:00 sleep 4096
+29538  2262 29538 29538 ?           -1 S     1002   0:00 sleep 180
+[wind@starry-sky pipe]$
+```
+
+我们看到`sleep 6194`，`sleep 1024`，`sleep 4096`，有着相同的父进程，也就是`bash`，它们具有一定的血缘关系，简单的说，`bash`先创建两个管道，然后再创建`sleep 6194`和`sleep 1024`这两个子进程，在这两个子进程被对应的指令替换前，`sleep 6194`的标准输出被重定向到了第一个管道的写端，而`sleep 1024`的标准输入被重定向到了第一个管道的读端，然后又创建了进程`sleep 4096`，并把`sleep 1024`的标准输出重定向到第二个管道的写端，`sleep 4096`的标准输入重定向到第二个管道的读端，这样它们就被联系起来了。
+
+具体我们就不写了，对我们来说，用`shell`作应用场景已经没有太大价值，所以我们换个场景。
+
+管道可以用于构建进程池。创建新进程对于系统来说是一个相对昂贵且复杂的操作。因此，与其在需要时再动态创建新进程，不如在程序初始化时预先一次性创建多个子进程，并通过管道与这些子进程通信，让它们根据接收到的指令执行特定任务。
+
+例如，可以一次性创建三个子进程，分别记为 A、B 和 C。每创建一个子进程之前，先创建一个管道作为父进程与该子进程之间的通信信道。其中，父进程充当管道的写端，子进程则充当管道的读端。这样，在创建完三个子进程后，父进程就持有三个独立的管道，分别对应子进程 A、B 和 C。父进程向管道 a 写入指令，子进程 A 便会从中读取并执行相应任务。同理，B 和 C 的操作方式类似。
+
+需要注意的是，管道的通信方式相对简单、底层，其数据传输是面向字节流的。这种特性决定了通信双方需要事先约定数据的格式和含义，以便正确解析。一个常见的约定是使用任务码，每个任务码对应一个具体的功能实现。父进程通过管道发送任务码，子进程解析任务码后调用相应的功能，从而实现灵活的任务分配。如果子进程在管道中读不到信息，则会进入阻塞状态。
+
+在进程池的设计中，管道通信可以作为一个底层机制，而面向对象的设计思想可以被用来封装这一过程。虽然进程池本质上是面向过程的，因为进程具有独立性，无法直接共享内存或状态，它依赖于通过管道在父进程和子进程之间进行任务传递，但我们可以通过面向对象的方法来更高层次地抽象和管理这个过程。具体来说，我们可以将每个子进程封装为一个对象，进程池和任务调度机制也可以封装成一个类，用户只需与这些类的接口进行交互，而不需要关心底层的进程创建、管道操作或任务分配的细节。
+
+子进程本身可以作为一个独立的类来管理，负责启动、执行任务以及与父进程通过管道进行通信。管道的操作也可以封装在一个专门的类中，提供简洁的接口来实现数据的传输。进程池则负责管理多个子进程，调度空闲进程来处理任务，保证任务能够在进程池中均衡分配。
+
+我们先定义一个结构体用于描述每个子进程的进程ID和对应管道的文件描述符
+
+```cpp
+#include <unistd.h>
+#include <string>
+#include <vector>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+namespace wind
+{
+    struct channel
+    {
+        int _cmdfd;               // 负责发送指令的文件描述符
+        pid_t _taskid;            // 子进程的pid
+        std::string _processname; // 子进程的代称
+
+        channel(int cmdfd, int taskid, const std::string &name = std::string())
+            : _cmdfd(cmdfd), _taskid(taskid), _processname(name)
+        {
+        }
+    };
+}
+```
+
+接着我们去定义进程池这个类
+
+```cpp
+class taskpool
+    {
+        typedef void (*func)();
+
+    public:
+        taskpool(std::vector<func> tasks, int processnum = 5) // 缺省参数默认创建五个子进程
+            : _tasks(tasks)  // 定义和初始化对象中的任务集
+        {
+            // 函数体部分负责信道的建立
+            // 包含子进程及其对应管道的创建
+                
+            
+        }
+
+    private:
+        std::vector<channel> _channels;   // 描述子进程及对应的信道
+        std::vector<func> _tasks;         // 任务集，为了降低理解门槛，这里就用无参无返回函数指针，任务码就是其对应的下标
+    };
+```
+
+```cpp
+// 函数体部分负责信道的建立
+// 包含子进程及其对应管道的创建
+
+while (processnum--)
+{
+    int pipeid[2];
+    int i = pipe(pipeid);
+
+    // 管道异常处理
+    if (i != 0)
+    {
+        fprintf(stderr, "%s\n", "Fatal error, pipe cannot be created.");
+        exit(1);
+    }
+
+    pid_t id = fork();
+    if (id > 0)
+    {
+        // 父进程流
+        close(pipeid[0]); // 关闭读端
+
+        // 输出提示
+        fprintf(stderr, "%s:%d %s%d\n", "子进程创建成功 pid",id, "信道为", pipeid[1]);
+
+        _channels.push_back(channel(pipeid[1], id));
+    }
+    else if (id == 0)
+    {
+        // 子进程流
+        
+        // 子进程文件状态初始化
+        for (const auto &e : _channels) // 关闭从父进程继承下来的其余兄弟进程管道
+        {
+            close(e._cmdfd);
+        }
+
+        close(pipeid[1]);   // 关闭写端
+        dup2(pipeid[0], 0); // 将管道重定向为标准输入
+        close(pipeid[0]);   // 顺手关掉原文件
+        
+        // 子进程的轮询执行内容
+        while (1)
+        {
+            int i; // 数据缓冲区
+            ssize_t n = read(0, &i, sizeof(int));
+            printf("子进程%d所读到的字节数:%d\n", getpid(), n);
+            if (n == sizeof(int))
+            {
+                _tasks[i]();
+            }
+            else if (n == 0)
+            {
+                // 写端已经关闭
+                break;
+            }
+            else
+            {
+                // read出错了
+                fprintf(stderr, "%s\n", "Fatal error, Read failed.");
+            }
+        }
+        // 提示性信息，用于丰富运行时效果
+        printf("%s:%d\n", "这个子进程即将退出", getpid());
+        exit(0);
+    }
+    else
+    {
+        // fork出错了
+        fprintf(stderr, "%s\n", "Fatal error, process cannot be created.");
+    }
+}
+```
+
+这里有一个很重要的点要注意，就是子进程文件状态初始化中一定要把`_channels`里的文件文件描述符给关掉。下面我拿创建两个子进程的情况简要说明一下。
+
+我们记第一个被创建的进程是A，在A即将被创建前，父进程的文件描述表是这样的：0号下标是标准输入，1号下标是标准输出，2号下标是标准错误，在管道被创建后，我们记这个管道为a，a的读端位于3号下标，a的写端位于4号下标。
+
+进程分流之后，父进程的管道读端被关闭，这样父进程文件描述符表的3号下标现在就指向空了；而A继承了父进程的文件描述符状态，3号是读端，4号是写端，随后我们关闭了子进程的写端，并在重定向读端之后关闭了原读端，所以A文件描述符表的状态是，0号下标是读端，2号是标准输出，3号是标准错误，到目前还没有问题。
+
+在第二次循环，我们创建了新的管道b，在B被创建之前，父进程的文件描述符表状态是，0号标准输入，1号标准输出，2号标准错误，3号是b的读端，4号是a的写端，5号是b的写端。
+
+在B创建之后，父进程关闭了b的读端，于是现在父进程的状态是0号标准输入，1号标准输出，2号标准错误，3号是空，4号是a的写端，5号是b的写端；而B继承了父进程分流前的文件状态，即0号标准输入，1号标准输出，2号标准错误，3号是b的读端，4号是a的写端，5号是b的写端，随后我们关闭了子进程的写端，并在重定向读端之后关闭了原读端，所以B文件描述符表的状态是0号b的读端，1号标准输出，2号标准错误，3号是空，4号是a的写端，5号是空。
+
+这样，B就有了a的写端，这就会引发进程等待的问题，我们的本意是，每个管道都只有一个写端和一个读端，写端在父进程，读端在子进程，可现在，有些管道有多个写端，比如对于上面的a来说，它有两个写端，一个在父进程，一个在B中，那等到父进程关闭a的写端时，由于B中也有一个a的写端，所以a的写端没有完全关闭，所以A就会一直阻塞在`read`。此时如果父进程采用的是阻塞等待就会因为A迟迟不退出而也发生阻塞，这样父子进程都始终无法退出。
+
+所以一定子进程进入之后一定要把不相关的文件关了。
+
+接下来是调用，采用的是轮询调度机制
+
+```cpp
+bool call(int taskcode)
+{
+    static int scheduling = 0;
+    if (taskcode >= 0 && taskcode < _tasks.size())
+    {
+        printf("向%d发送消息\n", _channels[scheduling]._taskid);
+        write(_channels[scheduling]._cmdfd, &taskcode, sizeof(int));
+        scheduling++;
+        if (scheduling == _channels.size())
+            scheduling = 0;
+        return true;
+    }
+    else
+    {
+        // 非法的任务码
+        return false;
+    }
+}
+```
+
+析构负责回收子进程资源
+
+```cpp
+~taskpool()
+{
+    for (const auto &e : _channels)
+    {
+        int ret = close(e._cmdfd);
+
+        fprintf(stderr, "%s:%d\n", "信道已关闭", e._cmdfd);
+
+        int status = 0;
+        pid_t i = waitpid(e._taskid, &status, 0);
+
+        // 在ProcessWaiting.md中对waitpid的使用和返回有详细介绍
+        if (i > 0)
+        {
+            // 回收成功
+            printf("回收进程资源%d\n", e._taskid);
+
+            // 查看子进程退出状态
+            if (WIFEXITED(status))
+            {
+                printf("正常退出, 退出码 : %d\n", WEXITSTATUS(status));
+            }
+            else
+            {
+                printf("异常退出, 退出码 : %d\n", WTERMSIG(status));
+            }
+        }
+        else if (i < 0)
+        {
+            // waitpid自己出错了
+            fprintf(stderr, "%s\n", "Fatal error, Waitpid Failed.");
+        }
+        else
+        {
+            // 实际上不会用到该分支，顺手写的，若是采用轮询式等待，具有返回0的可能性
+            fprintf(stderr, "%s\n", "No child process state changed.");
+        }
+    }
+}
+```
+
+上述代码皆位于`taskpool.hpp`中，接下来我们写一下配套文件
+
+```cpp
+// tasks.hpp
+#include <iostream>
+
+void f1()
+{
+    std::cout << 1 << std::endl;
+}
+
+void f2()
+{
+    std::cout << 2 << std::endl;
+}
+
+void f3()
+{
+    std::cout << 3 << std::endl;
+}
+
+void f4()
+{
+    std::cout << 4 << std::endl;
+}
+
+void f()
+{
+}
+
+// main.cc
+#include<vector>
+#include<string>
+#include"taskpool.hpp"
+#include"tasks.hpp"
+
+using namespace std;
+
+typedef void(*func)();
+
+int main()
+{
+    // vector<func> tasks = {f1, f2, f3, f4};
+    vector<func> tasks = {f, f, f, f};
+    wind::taskpool t(tasks);
+    int i = 5;
+    int j = 0;
+    while(i--)
+    {
+        t.call(j);
+        j++;
+        if(j == tasks.size())
+        {
+            j = 0;
+        }
+    }
+    return 0;
+}
+```
+
+```makefile
+processPool: main.cc taskpool.hpp tasks.hpp
+	@g++ $^ -g -o $@
+.PHONY:clean
+clean:
+	@rm -f processPool
+run:processPool
+	@./$^
+```
+
+我们来运行一下
+
+```shell
+[wind@starry-sky pipe_using]$ make clean;make
+[wind@starry-sky pipe_using]$ ./processPool 
+子进程创建成功 pid:22331 信道为4
+子进程创建成功 pid:22332 信道为5
+子进程创建成功 pid:22333 信道为6
+子进程创建成功 pid:22334 信道为7
+子进程创建成功 pid:22335 信道为8
+向22331发送消息
+向22332发送消息
+向22333发送消息
+向22334发送消息
+向22335发送消息
+信道已关闭:4
+子进程22331所读到的字节数:4
+子进程22331所读到的字节数:0
+这个子进程即将退出:22331
+子进程22332所读到的字节数:4
+回收进程资源22331
+正常退出, 退出码 : 0
+信道已关闭:5
+子进程22332所读到的字节数:0
+这个子进程即将退出:22332
+子进程22333所读到的字节数:4
+子进程22334所读到的字节数:4
+子进程22335所读到的字节数:4
+回收进程资源22332
+正常退出, 退出码 : 0
+信道已关闭:6
+子进程22333所读到的字节数:0
+这个子进程即将退出:22333
+回收进程资源22333
+正常退出, 退出码 : 0
+信道已关闭:7
+子进程22334所读到的字节数:0
+这个子进程即将退出:22334
+回收进程资源22334
+正常退出, 退出码 : 0
+信道已关闭:8
+子进程22335所读到的字节数:0
+这个子进程即将退出:22335
+回收进程资源22335
+正常退出, 退出码 : 0
+[wind@starry-sky pipe_using]$
+```
+
+下面我们看看如果子进程没有关闭从父进程继承下来的文件会发生什么。
+
+```cpp
+else if (id == 0)
+{
+
+    // for (const auto &e : _channels) // 关闭从父进程继承下来的其余兄弟进程管道
+    // {
+    //     close(e._cmdfd);
+    // }
+
+    // 子进程流
+    close(pipeid[1]);   // 关闭写端
+    dup2(pipeid[0], 0); // 将管道重定向为标准输入
+    close(pipeid[0]);   // 顺手关掉原文件
+    while (1)
+    {
+        // printf("%s:%d\n", "这是子进程", getpid());
+        int i;
+        ssize_t n = read(0, &i, sizeof(int));
+        printf("子进程%d所读到的字节数:%d\n", getpid(), n);
+        if (n == sizeof(int))
+        {
+            _tasks[i]();
+        }
+        else if (n == 0)
+        {
+            // 写端已经关闭
+            break;
+        }
+        else
+        {
+            fprintf(stderr, "%s\n", "Fatal error, Read failed.");
+        }
+    }
+    printf("%s:%d\n", "这个子进程即将退出", getpid());
+    exit(0);
+}
+```
+
+如果我们这样等待，就会直接卡死
+
+```cpp
+~taskpool()
+{
+    for (const auto &e : _channels)
+    {
+        int ret = close(e._cmdfd);
+
+        fprintf(stderr, "%s:%d\n", "信道已关闭", e._cmdfd);
+
+        int status = 0;
+        pid_t i = waitpid(e._taskid, &status, 0);
+
+        // 在ProcessWaiting.md中对waitpid的使用和返回有详细介绍
+        if (i > 0)
+        {
+            // 回收成功
+            printf("回收进程资源%d\n", e._taskid);
+
+            // 查看子进程退出状态
+            if (WIFEXITED(status))
+            {
+                printf("正常退出, 退出码 : %d\n", WEXITSTATUS(status));
+            }
+            else
+            {
+                printf("异常退出, 退出码 : %d\n", WTERMSIG(status));
+            }
+        }
+        else if (i < 0)
+        {
+            // waitpid自己出错了
+            fprintf(stderr, "%s\n", "Fatal error, Waitpid Failed.");
+        }
+        else
+        {
+            // 实际上不会用到该分支，顺手写的，若是采用轮询式等待，具有返回0的可能性
+            fprintf(stderr, "%s\n", "No child process state changed.");
+        }
+    }
+}
+
+```
+
+```shell
+[wind@starry-sky pipe_using]$ make clean ; make
+[wind@starry-sky pipe_using]$ ./processPool
+子进程创建成功 pid:12782 信道为4
+子进程创建成功 pid:12783 信道为5
+子进程创建成功 pid:12784 信道为6
+子进程创建成功 pid:12785 信道为7
+子进程创建成功 pid:12786 信道为8
+向12782发送消息
+向12783发送消息
+向12784发送消息
+向12785发送消息
+向12786发送消息
+信道已关闭:4
+子进程12786所读到的字节数:4
+子进程12783所读到的字节数:4
+子进程12782所读到的字节数:4
+子进程12785所读到的字节数:4
+子进程12784所读到的字节数:4
+
+```
+
+我们再从另一个窗口中看看进程状态
+
+```shell
+[wind@starry-sky pipe_using]$ ps ajx | head -1 ; ps ajx | grep processPool | grep -v grep
+ PPID   PID  PGID   SID TTY      TPGID STAT   UID   TIME COMMAND
+12314 12781 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+12781 12782 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+12781 12783 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+12781 12784 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+12781 12785 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+12781 12786 12781 12314 pts/8    12781 S+    1002   0:00 ./processPool
+[wind@starry-sky pipe_using]$
+```
+
+我们看到包括父进程在内的所有进程都卡死了，都进入了阻塞状态，对于父进程，是在`waitpid`阻塞，对于子进程，是在`read`阻塞
+
+然后看看外部阻塞等待会怎么样
+
+```cpp
+~taskpool()
+{
+    for (const auto &e : _channels)
+    {
+        int ret = close(e._cmdfd);
+
+        fprintf(stderr, "%s:%d\n", "信道已关闭", e._cmdfd);
+
+    }
+
+    int i = 0;
+    while(i <_channels.size())
+    {
+        int status = 0;
+        pid_t ret = waitpid(_channels[i]._taskid, &status, 0); // 外部阻塞等待
+        //pid_t ret = waitpid(_channels[i]._taskid, &status, WNOHANG);
+
+        if (ret > 0)
+        {
+            i++;
+            printf("回收进程资源%d\n", ret);
+            if (WIFEXITED(status))
+            {
+                printf("正常退出, 退出码 : %d\n", WEXITSTATUS(status));
+            }
+            else
+            {
+                printf("异常退出, 退出码 : %d\n", status & 0x7f);
+            }
+        }
+        else if (ret < 0)
+        {
+            perror("failed wait");
+        }
+        else
+        {
+            printf("未获得等待状态\n");
+        }
+        sleep(1);
+    }
+}
+```
+
+```shell
+[wind@starry-sky pipe_using]$ make clean ; make
+[wind@starry-sky pipe_using]$ ./processPool
+子进程创建成功 pid:13176 信道为4
+子进程创建成功 pid:13177 信道为5
+子进程创建成功 pid:13178 信道为6
+子进程创建成功 pid:13179 信道为7
+子进程创建成功 pid:13180 信道为8
+向13176发送消息
+向13177发送消息
+向13178发送消息
+向13179发送消息
+向13180发送消息
+信道已关闭:4
+信道已关闭:5
+信道已关闭:6
+信道已关闭:7
+信道已关闭:8
+子进程13176所读到的字节数:4
+子进程13177所读到的字节数:4
+子进程13178所读到的字节数:4
+子进程13179所读到的字节数:4
+子进程13180所读到的字节数:4
+子进程13180所读到的字节数:0
+这个子进程即将退出:13180
+子进程13179所读到的字节数:0
+这个子进程即将退出:13179
+子进程13178所读到的字节数:0
+这个子进程即将退出:13178
+子进程13177所读到的字节数:0
+这个子进程即将退出:13177
+子进程13176所读到的字节数:0
+这个子进程即将退出:13176
+回收进程资源13176
+正常退出, 退出码 : 0
+回收进程资源13177
+正常退出, 退出码 : 0
+回收进程资源13178
+正常退出, 退出码 : 0
+回收进程资源13179
+正常退出, 退出码 : 0
+回收进程资源13180
+正常退出, 退出码 : 0
+[wind@starry-sky pipe_using]$
+```
+
+我们看到一个很奇怪的现象，首先没有卡死，确实全部进程都成功退出了，另一个现象是，它这里进程的退出（也就是“这个子进程即将退出”提示信息）和进程的资源回收（“回收进程资源”提示信息）给人一种递归的感觉，为什么呢？
+
+第一个关闭的进程是`13180`，为什么呢？因为它后面没有进程了，所以与之对应的管道写端就一个，就在父进程里面，而父进程又关闭了这个写端，所以`13180`就先退出了，`13180`的退出也会导致其从父进程继承下来的其它管道写端而关闭，于是`13179`的所有写端就关闭了，所以它就自己退出了，接着是是`13178`，`13177`，`13176`，`13176`结束之后，父进程就等到了，于是就回收了进程资源，接着是`13177`，`13178`，`13179`，`13180`，所以给人一种递归的感觉。
+
+如果你采用轮询等待，可能会先打印`未获得等待状态`，因为"递"的过程需要一定时间，所以第一次等待可能并没有等到，之后我们可能因为休眠一秒，所以“递”的过程就结束了，于是就能等到了。
+
+```cpp
+~taskpool()
+{
+    for (const auto &e : _channels)
+    {
+        int ret = close(e._cmdfd);
+
+        fprintf(stderr, "%s:%d\n", "信道已关闭", e._cmdfd);
+
+    }
+
+    int i = 0;
+    while(i <_channels.size())
+    {
+        int status = 0;
+        //pid_t ret = waitpid(_channels[i]._taskid, &status, 0); // 外部阻塞等待
+        pid_t ret = waitpid(_channels[i]._taskid, &status, WNOHANG);
+
+        if (ret > 0)
+        {
+            i++;
+            printf("回收进程资源%d\n", ret);
+            if (WIFEXITED(status))
+            {
+                printf("正常退出, 退出码 : %d\n", WEXITSTATUS(status));
+            }
+            else
+            {
+                printf("异常退出, 退出码 : %d\n", status & 0x7f);
+            }
+        }
+        else if (ret < 0)
+        {
+            perror("failed wait");
+        }
+        else
+        {
+            printf("未获得等待状态\n");
+        }
+        sleep(1);
+    }
+}
+```
+
+```shell
+[wind@starry-sky pipe_using]$ make clean ; make
+[wind@starry-sky pipe_using]$ ./processPool
+子进程创建成功 pid:14353 信道为4
+子进程创建成功 pid:14354 信道为5
+子进程创建成功 pid:14355 信道为6
+子进程创建成功 pid:14356 信道为7
+子进程创建成功 pid:14357 信道为8
+向14353发送消息
+向14354发送消息
+向14355发送消息
+向14356发送消息
+向14357发送消息
+信道已关闭:4
+信道已关闭:5
+信道已关闭:6
+信道已关闭:7
+信道已关闭:8
+未获得等待状态
+子进程14353所读到的字节数:4
+子进程14354所读到的字节数:4
+子进程14355所读到的字节数:4
+子进程14357所读到的字节数:4
+子进程14357所读到的字节数:0
+这个子进程即将退出:14357
+子进程14356所读到的字节数:4
+子进程14356所读到的字节数:0
+这个子进程即将退出:14356
+子进程14355所读到的字节数:0
+这个子进程即将退出:14355
+子进程14354所读到的字节数:0
+这个子进程即将退出:14354
+子进程14353所读到的字节数:0
+这个子进程即将退出:14353
+回收进程资源14353
+正常退出, 退出码 : 0
+回收进程资源14354
+正常退出, 退出码 : 0
+回收进程资源14355
+正常退出, 退出码 : 0
+回收进程资源14356
+正常退出, 退出码 : 0
+回收进程资源14357
+正常退出, 退出码 : 0
+[wind@starry-sky pipe_using]$
+```
+
+不过我们最好还是直接在子进程关闭继承下来的写端，从而避免出现一些其它的未知问题。
+
+ ## Named_Pipe
+
+之前我们说的是匿名管道，接下来我们说说命名管道。匿名管道因为没有名字，所以无法指代，因此只能通过父子进程分流时的文件状态继承来建立联系，而对于命名管道来说，因为具有名字所以可以指代，即使是对于没有任何关系的两个进程来说，命名管道也可以作为它们通信的媒介。
+
+我们先用指令创建一个命名管道。
+
+![image-20241209194447260](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241209194447437.png)
+
+为什么叫`FIFO`先进先出呢？因为管道就像是队列一样，其中的字节流具有先进先出的性质。
+
+```shell
+[wind@starry-sky named_pipes]$ ll
+total 0
+[wind@starry-sky named_pipes]$ mkfifo pipe
+[wind@starry-sky named_pipes]$ ls
+pipe
+[wind@starry-sky named_pipes]$ ll
+total 0
+prw-rw-r-- 1 wind wind 0 Dec  9 20:16 pipe
+[wind@starry-sky named_pipes]$
+```
+
+文件类型以`p`开头，虽然`ll`可以检索出它，但它并不是硬盘文件，而是和匿名管道一样，都是内存文件。
+
+如果没有建立信道，即同时打开命名管道的写端和读端，那对它的读写都会进入阻塞。比如我们现在建立两个窗口，准备一个对管道写，一个对管道读。
+
+如果光写，就会发现进程进入了阻塞状态
+
+```shell
+[wind@starry-sky named_pipes]$ echo "You cannot step into the same river twice." > pipe
+[wind@starry-sky named_pipes]$ while : ; do echo "You cannot step into the same river twice."; sleep 1; done >> pipe
+```
+
+```shell
+[wind@starry-sky named_pipes]$ cat pipe
+You cannot step into the same river twice.
+[wind@starry-sky named_pipes]$ cat pipe
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+You cannot step into the same river twice.
+
+```
+
+<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241209203803707.mp4"></video>
+
+命名管道的原理和匿名管道一致。虽说管道是一种内存级文件，但是，它仍然具有内存级别文件结构，有内存级的缓冲区，只不过存储媒介不同，也有对应的`inode`编号。虽说它是内存文件，但其文件名和inode编号的映射关系仍被记录在所在目录的data block中，这是为了保持文件系统的一致性。反正有管道路径就能找到这个管道，所以可被指代，因此可供毫无关系的进程间进行通信。
+
+现在我们用代码写写看
+
+就把这两个独立进程叫做`server`(服务端)和`client`(用户端)，它们有一个共用的头文件`comm`(communication 通信)。
+
+```makefile
+.PHONY:all
+all:client server
+client:client.cc
+	@g++ $^ -o $@
+server:server.cc
+	@g++ $^ -o $@
+
+.PHONY:clean
+clean:
+	@rm -rf client server
+```
+
+通信的形式是，用户对客户端输入信息，服务端打印信息
+
+```cpp
+// comm.h
+#pragma once
+
+#include<unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include<cstdio>
+#include<cstdlib>
+#include<iostream>
+#include<string>
+
+
+#define FIFO_NAME "myfifo" // The name of the pipe
+#define MODE 0664          // The creation mode of the pipe
+
+enum exit_code
+{
+    FIFO_CREATE_ERROR = 1,
+    FIFO_REMOVE_ERROR = 2,
+    FIFO_OPEN_ERROR = 3,
+    FIFO_READ_ERROR = 4,
+    FIFO_WRITE_ERROR = 5
+};
+
+
+// server.cc
+#include"comm.h"
+
+using namespace std;
+
+int main()
+{
+    // 创建命名管道
+    if(mkfifo(FIFO_NAME, MODE) != 0)
+    {
+        perror("failed mkfifo");
+        exit(FIFO_CREATE_ERROR);
+    }
+
+    // 建立信道
+    int fd = open(FIFO_NAME, O_RDONLY);
+    if(fd < 0)
+    {
+        perror("failed open");
+        exit(FIFO_OPEN_ERROR);
+    }
+
+    cout<<"The server is now able to receive information."<<endl;
+
+    // 数据处理
+    char buffer[1024];
+    while(1)
+    {
+        buffer[0] = 0;
+        ssize_t  n = read(fd, buffer, sizeof(buffer) - 1);
+        if(n > 0)
+        {
+            buffer[n] = 0;
+            cout<<"client say# "<<buffer<<endl;
+        }
+        else if(n == 0)
+        {
+            cout<<"client quit, me too."<<endl;
+            break;
+        }
+        else
+        {
+            perror("failed read");
+            exit(FIFO_READ_ERROR);
+        }
+    }
+
+
+    // 善后操作
+    close(fd);
+    if(unlink(FIFO_NAME) != 0)
+    {
+        perror("failed unlink");
+        exit(FIFO_REMOVE_ERROR);
+    }
+
+    return 0;
+}
+
+// client.cc
+#include"comm.h"
+
+
+using namespace std;
+int main()
+{
+    int fd = open(FIFO_NAME, O_WRONLY);
+    if(fd < 0)
+    {
+        perror("failed open");
+        exit(FIFO_OPEN_ERROR);
+    }
+
+    cout<<"The client is now able to send messages."<<endl;
+
+    string buffer;
+    while(1)
+    {
+        cout<<"Please input# ";
+        getline(cin, buffer); // 不把空格作为分隔符
+        if(write(fd, buffer.c_str(), buffer.size()) < 0)
+        {
+            perror("failed wwirte");
+            exit(FIFO_WRITE_ERROR);
+        }
+    }
+
+    close(fd);
+    return 0;
+}
+```
+
+代码具体内容就不说了，我们直接看看现象
+
+<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210144419021.mp4"></video>
+
+当服务端刚刚打开后，由于客户端还没运行，所以管道写端还未打开，因此服务端一直阻塞在`open`。也就是说，单纯考虑`open`对管道的打开是否阻塞取决于是否建立了完整的信道，如果只有读端，没有写端，则读端会一直阻塞在`open`，如果没有读端，只有写端，写端也会一致阻塞在`open`，当写端关闭后，读端`read`返回0，意味着文件已经读到末尾。
+
 # end
