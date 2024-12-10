@@ -590,7 +590,7 @@ int main()
 
 不过我们对位操作不太熟，可以用相应的宏`WIFEXITED(status)`和`WEXITSTATUS(status)`
 
-`WIFEXITED(status)`底层是个宏函数，当异常信息编号为0，也就是没有异常信息时，它会返回真，而`WEXITSTATUS(status)`就是退出码。
+`WIFEXITED(status)`底层是个宏函数，当异常信息编号为0，也就是没有异常信息时，它会返回真，而`WEXITSTATUS(status)`就是退出码，异常退出也有自己的退出码宏`WTERMSIG(status)`。
 
 ```c
 int main()
@@ -631,7 +631,7 @@ int main()
         }
         else 
         {
-            printf("Exception Interrupt, code : %d\n", status & 0x7f);
+            printf("Exception Interrupt, code : %d\n", WTERMSIG(status));
         }
         //printf("Error message : %d\n", status & 0x7f);
         //printf("Exit code : %d\n", WEXITSTATUS(status));
@@ -719,7 +719,7 @@ int main()
             }
             else 
             {
-                printf("Exception Interrupt, code : %d\n", status & 0x7f);
+                printf("Exception Interrupt, code : %d\n", WTERMSIG(status));
             }
 
         }
