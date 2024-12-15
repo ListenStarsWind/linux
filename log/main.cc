@@ -2,7 +2,7 @@
 
 int main()
 {
-    wind::log log(wind::category);
+    wind::Log log(wind::category);
     log(wind::Info, "hello");
     log(wind::Debug, "hello");
     log(wind::Warning, "hello");
