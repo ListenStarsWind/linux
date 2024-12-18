@@ -1171,4 +1171,254 @@ Please enter: ^C
 
 这样就可以让共享内存有同步互斥的效果。
 
+# others
+
+接下来我们谈谈消息队列和信号量。消息队列我们只略微提一下，信号量在这里也是略微提一下，在线程阶段我们再深入探讨。为什么要把共享内存，消息队列，信号量放在同一个文章里说呢？因为它们都是基于`System V`标准的进程通信方案，所以在使用接口，内核形式都具有很多相似点。
+
+让我们先回顾一下共享内存的各种接口
+
+用于获取内核标识符的`ftok`(file to key)，将一个文件转化为唯一的关键字，文件是Linux中的稳定实体，它本身就具有唯一性，以它为担保生成的键值，是一个稳定且唯一的键值。用该键值就可以区分各种共享资源。
+![image-20241214172114632](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214172114739.png)
+
+用于创建共享内存的`shmget`，它返回一个用户级标识符
+![image-20241214163431072](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214163431155.png)
+
+用于把共享内存附加到进程地址空间中`shmat`
+![image-20241214205621021](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214205621113.png)
+
+用于对共享内存进行控制的`shmctl`
+![image-20241215103128729](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241215103128871.png)
+
+共享内存面向用户的内核数据结构是
+```cpp
+struct shmid_ds {
+    struct ipc_perm shm_perm;    /* Ownership and permissions */
+    size_t          shm_segsz;   /* Size of segment (bytes) */
+    time_t          shm_atime;   /* Last attach time */
+    time_t          shm_dtime;   /* Last detach time */
+    time_t          shm_ctime;   /* Last change time */
+    pid_t           shm_cpid;    /* PID of creator */
+    pid_t           shm_lpid;    /* PID of last shmat(2)/shmdt(2) */
+    shmatt_t        shm_nattch;  /* No. of current attaches */
+    ...
+};
+
+
+struct ipc_perm {
+    key_t          __key;    /* Key supplied to shmget(2) */
+    uid_t          uid;      /* Effective UID of owner */
+    gid_t          gid;      /* Effective GID of owner */
+    uid_t          cuid;     /* Effective UID of creator */
+    gid_t          cgid;     /* Effective GID of creator */
+    unsigned short mode;     /* Permissions + SHM_DEST and
+                                           SHM_LOCKED flags */
+    unsigned short __seq;    /* Sequence number */
+};
+
+```
+
+接下来我们说说消息队列
+
+消息队列，其实就是系统创建的队列，这个队列独立于进程存在，所以可以让进程间进行通信，需要注意的是，消息队列是双向的，每个进程既有写端，也有读端。进程之间通过某些约定就可以直接以数据块为单位进行通信。
+
+为了便于数据块类型的识别，消息队列的通信需要遵循一定的规则，它要求每个数据块以
+
+```cpp
+struct msgbuf {
+    long mtype;       /* message type, must be > 0 */
+    char mtext[1];    /* message data */
+};
+```
+
+的形式进行通信。其中第一个成员`mtype`是一个`long`类型，用于区别传输的数据类型，在通信前，可以通过诸如宏，枚举的方式，将参与通信的数据类型进行一一映射，这样就可以根据`mtype`区分实际传送数据的类别；第二个成员`mtext[1]`是一个变长数组，用于存储真正的传送数据，这个数组的一个元素是用来占位的，更标准的写法应该是`char mtext[]`。
+
+比如现在我们有一个`mytype`的类型，并用这个类型创建了一个变量，那么就可以这样生成数据块`msgbuf`
+
+```cpp
+// 伪代码 仅作思路展示
+
+// 枚举其实并不好
+// 因为枚举值是int类型
+//enum types
+//{
+//    mytype,
+//    ...
+//};
+
+#define MYTYPE 1
+
+// 需要用户自己定义
+struct msgbuf {
+    long mtype;       
+    char mtext[];     
+};
+
+mytype a;
+
+struct msgbuf* msg = (struct msgbuf*)malloc(sizeof(long) + sizeof(mytype));
+// 写成这样也行
+// void* msg = malloc(sizeof(long) + sizeof(mytype));
+
+msg->mtype = MYTYPE;
+
+// mtext是数组名,也就是首元素地址  不能赋值,赋值是非法的
+memcpy(msg->mtext, &a, sizeof(mytype));  
+```
+
+消息队列同样要有内核级标识符，同样是用`ftok`获得
+![image-20241214172114632](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214172114739.png)
+
+消息队列的创建方式与共享内存相似，如果想要确保获得新的消息队列，需要使用`IPC_CREAT | IPC_EXCL`，如果想用现成的，就用`IPC_CREAT`
+![image-20241217150230872](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150231086.png)
+
+消息队列不是内存块，有专门的读写接口，发送消息是`msgsnd`，接收消息是`msgrcv`
+![image-20241217150501728](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150501965.png)
+
+消息队列也有对应的控制接口
+![image-20241217150651663](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150651849.png)
+
+其面向用户的内核数据结构为
+
+```cpp
+struct msqid_ds {
+    struct ipc_perm msg_perm;     /* Ownership and permissions */
+    time_t          msg_stime;    /* Time of last msgsnd(2) */
+    time_t          msg_rtime;    /* Time of last msgrcv(2) */
+    time_t          msg_ctime;    /* Time of last change */
+    unsigned long   __msg_cbytes; /* Current number of bytes in
+                                                queue (nonstandard) */
+    msgqnum_t       msg_qnum;     /* Current number of messages
+                                                in queue */
+    msglen_t        msg_qbytes;   /* Maximum number of bytes
+                                                allowed in queue */
+    pid_t           msg_lspid;    /* PID of last msgsnd(2) */
+    pid_t           msg_lrpid;    /* PID of last msgrcv(2) */
+};
+
+struct ipc_perm {
+    key_t          __key;       /* Key supplied to msgget(2) */
+    uid_t          uid;         /* Effective UID of owner */
+    gid_t          gid;         /* Effective GID of owner */
+    uid_t          cuid;        /* Effective UID of creator */
+    gid_t          cgid;        /* Effective GID of creator */
+    unsigned short mode;        /* Permissions */
+    unsigned short __seq;       /* Sequence number */
+};
+
+```
+
+它也有对应的命令行操作(我的系统里没有消息队列)
+
+```shell
+[wind@starry-sky ~]$ ipcs -q
+
+------ Message Queues --------
+key        msqid      owner      perms      used-bytes   messages    
+
+```
+
+`ipcrm -q`同样可以删除对应`id`的消息队列
+
+我们再瞅一眼信号量
+
+![image-20241217151452157](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217151452278.png)
+
+![image-20241217151529536](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217151529701.png)
+
+
+
+我们发现，不管是共享内存，消息队列，信号量，其内核描述对象`struct nameid_ds`组织形式都是类似的，并且，`struct nameid_ds`的第一个成员，都是`struct ipc_perm`。实际上，系统中有一个专门用于进程间通信的`IPC`子系统，专门负责对于上述进程通信资源进行管理。下面我们就`IPC`子系统的工作逻辑进行基本的描述。
+
+在上面的学习过程中，我提到了一个很奇怪的词“面向用户的内核结构”，为什么我要用这个词呢？因为一方面，这些结构体里的数据确实是共享资源的内核数据拷贝，但另一方面，系统自己不是真的使用这些结构进行资源管理的，它有自己的面向系统的内核结构，这两者在形式上并无太大差别，但某些细节的改变使得“面向系统的内核结构”更容易被系统管理。面向用户的内核结构是给人看的，面向系统的内核结构是系统真正进行管理的。
+
+让我们把视角转回到`struct ipc_perm`
+
+```cpp
+struct ipc_perm {
+    key_t          __key;       
+    uid_t          uid;         
+    gid_t          gid;         
+    uid_t          cuid;        
+    gid_t          cgid;        
+    unsigned short mode;        
+    unsigned short __seq;       
+};
+```
+
+`IPC`子系统中有一个指针数组，数组中的每个元素都指向一个`struct ipc_perm`的对象，每当我们使用创建一个共享资源时，其`struct nameid_ds`中都有一个`struct ipc_perm`对象，指针数组指向的就是它们，而`nameget`系列接口返回的其实就是这个数组的下标，再加上我的系统之前没创建过共享资源，所以返回的`id`是从0开始，线性递增的。注意在系统中，真正使用的是面向系统结构体，面向系统和面向对象结体具有一定的区别，比如面向系统的`struct ipc_perm`中含有一个`types`字段，该字段表示`struct ipc_perm`到底处于何种`struct nameid_ds`中，比如如果某个`struct ipc_perm`中的`type`对象映射的是`struct msqid_ds`，就说明这是一个位于`struct msqid_ds`中的`struct ipc_perm`，所以就能通过`(struct msqid_ds*)ptr`的方式拿到`struct msqid_ds`的地址，有了`struct msqid_ds`的地址，自然可以访问`struct msqid_ds`的其它成员。
+
+用C++的视角来说，可以认为`struct ipc_perm`是基类，而`struct nameid_ds`是派生类，这是一种C语言的多态，在数组里的，是基类指针，不是派生类指针。所以还是那句话，C++等面向对象语言的创造者，不是某天一拍脑袋，觉得多态好，才让自家语言有了多态特性，而是在大量的工程实践中，体会到多态特性的必要性，所以为自家语言加上了多态特性。
+
+-----------
+
+现在让我们把视角转回到信号量。本文的信号量全是概念，具体应用要等到线程阶段。
+
+为了信号量不至于太抽象，先让我们设想一个场景：现在有两个进程`A`和`B`，它们之间为了进行通信，建立了共享内存，现在`A`往共享内存中写入一份数据，这份数据是一个整体，缺了就无法解析成功，由于共享内存不存在数据保护机制，所以就有可能出现这种情况：`A`还没把这份数据写完个，`B`就读了，这就会使得`B`得到一个残缺的数据，从而解析失败；又或者，`A`和`B`同时往共享内存中写，这样共享内存中的数据就会变得混乱，也会丧失原来的有效性。我们称这种问题叫做“数据不一致问题”。
+
+对于共享内存这种完全没有数据保护的共享资源，就可以对其加锁，当一个进程访问共享资源时，这个资源就被锁上了，其它进程无法访问，直到进程访问结束，否则其它进程就会一直无法使用该共享资源，通过这种方式，就实现了对共享资源的同步互斥。
+
+锁在生活中亦有体现，比如去自动取款机取钱时，只能一个一个人取，一个人使用ATM机时，那个小空间就会上锁，阻止其它人的使用请求。
+
+此时，我们就可以为同步互斥下一个非常朴素的定义：任何时刻，只允许一个执行流对共享资源进行访问。我们称这种具有同步互斥特性的共享资源称之为临界资源，比如管道就是一种临界资源，一是它可以被多个执行流访问，所以是共享资源，二是，它不允许多个执行流同时访问管道，所以它是临界资源。一般来说，临界资源这个概念是对内存空间说的。
+
+接下来我们想想让程序运行为什么要写代码，原因很简单，程序就是照着代码运行的，我们的代码实际上就是在描述程序运行的行为，程序之所以访问某个临界资源，是因为代码就这么写的，我们把让程序访问临界资源的那些代码称之为临界区。
+
+接下来我们说一个现象：当我们使用多进程或者多线程并发往屏幕上打印信息时，会发现它们是混着打印的，有时候`bash`也会来插一脚，我们为什么能在屏幕上打印信息？因为进程打开了屏幕所对应的文件，于是屏幕文件就变成了共享资源，但由于我们未对屏幕文件进行保护，所以导致信息混合打印。
+
+在有了上面的铺垫之后，我们来理解一下信号量。信号量的本质其实就是一个计数器，也就是`int count`，这个计数器的值表示一份临界资源中还剩几块临界资源可以被使用。就像内存或者文件系统一样，一个临界资源其内部也是会被分成多个块的，比如磁盘有分区，分区有各种块，而`Date blocks`里面还有一个个`Date block`。
+
+![image-20241120194848049](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201948217.png)
+
+一个临界资源也是如此，一个临界资源可以被细分成若干个块，就像一个电影院里面有多个座位，每个块在在某个时刻都只能被一个执行流访问，就像一个座位只能坐一个人一样，要么没执行流访问这个块，要访问，只能有一个执行流访问该块。
+
+并且，块也是可以被预定的，电影院里座位的使用权是从买过票时候开始的，即使现在这个座位还没人坐，那也不能给别人，因为已经有人预定过了。电影院的座位是有限的，我们可以用一个计数器描述当前还空闲的座位个数，每卖出一张票，计数器就要减一，当计数器减到0了，就说明没座位了，所以就不卖票了，其它人想用，那要先等着。
+
+现在，计算机里面有一份很大的资源，它可以被划分成多个小块，单个小块对于一个执行流来说是够用的，所以可以拆分，这样就可以提高多个执行流对该份临界资源的访问效率，从外面看上去，就像是多个执行流同时访问这份临界资源，但实际上，从内部来看，一个执行流只用一个小块，各个小块之间互不干扰。
+
+很明显，我们需要对这些小块进行管理，比如我们可以创建一个整型变量，这个变量刚开始记录了这份临界资源中的所有小块个数。每当有一个执行流过来想要申请资源时，临界资源就会找一份没人用的空闲块分配给这个执行流，并且让变量减去一，当变量归0了，就说明现在没有空闲的块了，如果又有执行流申请资源，就让它等着，而当一个执行流不在需要资源时，它所使用的块就重新变为了空闲状态，并且让变量加一。
+
+也就是说，这个变量描述的是这份临界资源还有多少未被预定的块。执行流对资源的申请，就类似于买票这种行为。这个计数器的作用就是传递一种信号——当前这份临界资源还有多少个块可被申请，所以被叫做`Semaphore`，其原义指的是一种用于远距离传递信息的信号装置或方法，尤其是指通过可视信号来传递信息的设备或系统，如旗语、灯光信号等，所以有些人把它翻译成信号灯，而`Semaphore`又来源于希腊语的**"sēma"**（标志、信号）和 **"phoros"**（携带、传送），更多人叫做“信号量”，量表示剩下块的数量，或者也可能表示它是一个变量，一个计数器。
+
+当这份临界资源只有一个块时，一旦某个执行流申请到了这个块，看上去就像这份临界资源被改执行流独享，相当于该执行流为这份临界资源上了锁，其它执行流不能用，所以只有`0 or 1`两种状态的信号量被称为二元信号量，又被称为锁。
+
+为什么这份临界资源只有一个块呢？因为这份临界资源太小了，分成小块不够一个执行流用，当然也不排除其它的特殊目的。
+
+现在我们来看信号量的两个关键操作，加加和减减。
+
+信号量作为内存中的一个数据，也可以被视为一份资源，虽说它身为系统内核数据，进程不能直接对其进行加加减减，但它们对于其它临界资源的申请，必然也会引发信号量的变化，所以信号量也可被视为一种共享资源，信号量自己会不会在加加减减的过程中因为多执行流并发访问而出错呢？这完全是有可能的。
+
+一般来说，加加减减操作都会被分解成若干条汇编指令，一般来说，是三种，首先把变量拷贝到CPU的寄存器上，然后对这个寄存器的内容进行加加减减，之后再把它拷回去，这样就可能会出现一些问题。
+
+现有两个执行流，其序号分别为`1`和`2`，`1`像让`i`加一，`2`想让`i`减一，如果加加减减操作是三条汇编的话，可能就会出现下面表格的情况，X表示寄存器，其上标表示对应哪个执行流。
+
+| 执行次序 | 执行指令            | 执行后变量值                  | 执行流序号 |
+| :------- | ------------------- | ----------------------------- | ---------- |
+| 1        | i = 1               | i = 1, X<sup>[1]</sup> = 未知 | 1          |
+| 2        | X<sup>[1]</sup> = i | i = 1, X<sup>[1]</sup> = 1    | 1          |
+| 3        | X<sup>[2]</sup> = i | i = 1, X<sup>[2]</sup> = 1    | 2          |
+| 4        | X<sup>[1]</sup>++   | i = 1, X<sup>[1]</sup> = 2    | 1          |
+| 5        | X<sup>[2]</sup>--   | i = 1, X<sup>[2]</sup> = 0    | 2          |
+| 6        | i = X<sup>[1]</sup> | i = 2, X<sup>[1]</sup> = 2    | 1          |
+| 7        | i = X<sup>[2]</sup> | i = 0, X<sup>[2]</sup> = 0    | 2          |
+
+为此，我们需要对信号量进行特别处理，使得其在加加减减的过程中是原子性的，什么叫原子性？就是说这个操作是不能被分割成更小的子操作的，要么这个操作干脆不做，要做就一口气做完，不存在正在做这种状态，对于这种场景，要么信号量不加加减减，要加加减减就一口气做完，它凭什么一口气做完，因为这个操作对应的汇编指令只有一条，可能还有一些其它方案，但我们先不考虑。
+
+下面我们过一下信号量的相关接口
+
+首先是获取信号量，其中`nsems`表示申请的信号量个数，也就是说`semget`可以一次性申请多个信号量，不过这里我们只是稍微过一下，所以就只申请一个信号量，如果申请多个，这些信号量实际上是放在一个数组中进行管理的，因此`nsems`应设为1，`semflg`表示创建方式
+
+```c
+int semget(key_t key, int nsems, int semflg);
+```
+
+`semctl`负责控制信号量，其中一种操作就是信号量的删除，其中`semnum`表示被删除信号量的下标，如果只有一个信号量，那这个参数就是0，`cmd`表示具体操作，可变参数用于传递操作中需要的内核结构，因为它包含信号量的设置功能，因此也可以对信号量进行初始化，设置最开始的值
+
+```c
+int semctl(int semid, int semnum, int cmd, ...);
+```
+
+信号量的加加减减有专门的接口，其中`struct sembuf`是包含三个成员的结构体，当前我们只需要知道前两个，第一个是`unsigned short`类型，表示数组下标，第二个是`short`类型，表示操作方式，是1就加加，是-1就减减。
+
+信号量虽然没有直接在多执行流中进行数据传送，但是它确实传递了信息，从而有利于多执行流之间的协同配合，也起到了对其它共享资源进行保护的作用，或者说，信号量在通信中更多是发挥管理的职责，而不是单纯做数据的传送，因此是通信中不可分割的一部分，所以归类于通信范畴。
+
 # end
