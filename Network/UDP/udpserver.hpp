@@ -86,8 +86,7 @@
                 // uint16_t port = ntohs(remote.sin_port);
                 // std::string ip = inet_ntoa(remote.sin_addr);
 
-                // // 如果负载数据是整数或包含多字节的数值, 应该转换为本机字节序
-                // // 但对于字符串来说, 由于构成字符串的基本元素, 字符就一个字节, 所以大小端都是一样的
+                // // 在用户层接收数据前, 数据的字节序已经被协议自动转换了, 所以这里不需要转
                 // buffer[len] = '\0';
                 // std::string temp(buffer);
                 // // 字符串加工,证明确实来过服务端
