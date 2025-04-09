@@ -224,7 +224,7 @@ bool unpack(std::string &in, std::string *out)
     // 存在足够长度的报文
     // 将这部分字符串移除
 
-    in.erase(0, pos + sizeof(HEADER_PAYLOAD_SEPARATOR) + should);
+    in.erase(0, pos + strlen(HEADER_PAYLOAD_SEPARATOR) + should);
     *out = payload;
 
     return true;

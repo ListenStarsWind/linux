@@ -6279,7 +6279,7 @@ bool unpack(std::string &in, std::string *out)
     // 存在足够长度的报文
     // 将这部分字符串移除
 
-    in.erase(0, pos + sizeof(HEADER_PAYLOAD_SEPARATOR) + should);
+    in.erase(0, pos + strlen(HEADER_PAYLOAD_SEPARATOR) + should);
     *out = payload;
 
     return true;
@@ -6293,5 +6293,1722 @@ bool unpack(std::string &in, std::string *out)
 在我们上面写的自定义协议中, 像`class tcpserver`这种负责通信管理的, 每次用户发出请求, 开一个线程或者进程的层就是会话层, 新开的执行流实际上就是属于用户的会话, 就像我们登录Linux, Linux为我们创建会话那样.               至于表示层, 它的功能实际上就是把数据转换成各种各样的形式,   上图说的, 设备固有格式到网络标准格式, 实际上就是序列化, 反过来则是反序列化. 所以表示层实际上就是协议负责的内容.        应用层则负责为用户提供具体的服务, 比如我们这里的网络计算功能, 由`class calculator`负责.    应用层, 表示层, 会话层实际上是要根据实际情况进行具体设计的, 所以它们三个写不进系统, 必须要由我们亲自把握. 
 
 好的, 我们的自定义协议现在其实已经写的差不多了, 这份自定义协议可能是我们人生第一次写协议, 也有可能是我们人生中最后几次写协议, 因为对于应用层协议来说, 市面上早就有很多非常成熟的协议了, 比如我们等会儿就说的`http`, 这里我们写协议主要是找找协议的感觉, 便于我们理解其它已经成熟的应用层协议, 这里之所以说是最后几次, 因为等会儿我们说`http`和其他成熟协议时还要手搓一个简易版本.  在这之后, 我们就有可能真的就不会再写协议了, 除非你公司业务比较特殊, 有自己的需求, 才会自己写协议自已用, 比如, 公司有些业务对安全由特殊要求, 可能会不放心用别人的, 可以差一点, 但不能不安全, 所以可能会自己写, 到时候, 就算出问题, 也能找到具体的人算账, 责任划分比较明确, 另外, 对于C++开发来说, 我们的一个方向是游戏开发, 游戏一般来说, 协议真的是自己从无到有一步步写出来的, 这种场景下, 协议还挺常见的. 
+
+哎呀, 刚刚突然看到一个bug, 在`unpack`那个函数里, 计算`HEADER_PAYLOAD_SEPARATOR`长度的应该是`strlen`, 而不是`sizeof`, 源代码我改了, 但上面的文档可能有没改的, 需要注意一下.
+
+## HTTP
+
+针对HTTP的学习, 我们主要有以下几个流程: 一是先介绍一下HTTP的基础知识, 二是通过两个网络工具直观看一下HTTP的请求和响应大概长什么样, 三是带大家写一个简单的HTTP服务.
+
+### 认识URL
+
+在我们之前的代码中, IP和端口几乎无处不在, 但在我们日常生活中, 其实很少真正直接使用IP和端口来指代某台服务器上的具体进程, 而是使用一个叫做域名的东西, 比如https://www.baidu.com中baidu.com就是一份域名, 其中, baidu是主域名, 也就是品牌或实体的名称, .com是顶级域名, 表示商业网站. 域名中其实包含着IP地址, 有专门的组织负责解析, 将其映射到某个IP地址上, 比如, 使用Windows的控制台, 执行`ping`指令, 就可以看到解析出的IP.
+
+```shell
+PS C:\Users\21066> ping www.baidu.com
+
+正在 Ping www.a.shifen.com [36.152.44.132] 具有 32 字节的数据:
+来自 36.152.44.132 的回复: 字节=32 时间=16ms TTL=52
+来自 36.152.44.132 的回复: 字节=32 时间=18ms TTL=52
+来自 36.152.44.132 的回复: 字节=32 时间=15ms TTL=52
+来自 36.152.44.132 的回复: 字节=32 时间=18ms TTL=52
+
+36.152.44.132 的 Ping 统计信息:
+    数据包: 已发送 = 4，已接收 = 4，丢失 = 0 (0% 丢失)，
+往返行程的估计时间(以毫秒为单位):
+    最短 = 15ms，最长 = 18ms，平均 = 16ms
+PS C:\Users\21066>
+```
+
+直接使用"36.152.44.132", 便能访问百度主页面
+
+![image-20250402195649574](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402195649798.png)
+
+不过这个可能因人而异, 有些情况下可能用不了, 不过那并不意味着里面没地址, 而是和各种原因有关, 这里我们就不深究了.
+
+你可能会问, 那端口呢? 端口不必在意, 我们之前说过, 特定的服务对应着特定的端口,  当你把这串IP输到地址栏后, 浏览器会默认其使用的是HTTP协议, HTTP协议使用80这个特定端口作为服务端的端口, 所以即使你没写端口号, 浏览器也能通过协议名把端口号加上.  
+
+不过我们平常用的链接也没这么直白, 往往还有其他内容, 比如我们这边随手点一篇腾讯主页的文章   https://news.qq.com/rain/a/20250402A01QIZ00
+
+![image-20250402202521931](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402202522081.png)
+
+这里面还有些别的内容, 不过这个链接还是不太完整, 
+
+![image-20250402203719616](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402203719671.png)
+
+这个链接被称为URL, 即统一资源定位符, 用来标识网络中的一份特定资源.比如, 文章, 音频, 视频... 它们都是网络资源.端口号可以用协议方案名推出来, 一般省略, 至于那个文件路径, 他前面也有一个`/`, 这个`/`被称为web根目录, 通常就是Linux的根目录, 但也有特殊情况, 我们之后会谈. 至于查询字符串, 是用于推送这种网络行为的, 网络行为总体上就两种, 一种是拉取, 就是把网上东西拿到本地, 除此之外就是推送, 就是把本地东西放网上, 当你推送时, 据需要用到查询字符串, 它实际上是一个kv结构的集合字符串, 最后的那个片段标识符不参与网络行为, 它的作用是定位页面中的某个特定位置, 让页面最开始位于这个位置. 
+
+另外, 我们可以从上面的示例URL中看到, 它中间有一些用来进行字段分割的特殊字符, 比如`@, ? , +, //, : `什么的, 如果用户上传的信息中有这些关键字就会被编码成其他内容, 从而防止其影响URL的解析.
+
+http://36.152.44.132/s?ie=utf-8&f=8&rsv_bp=1&rsv_idx=1&tn=baidu&wd=hello%20world&fenlei=256&rsv_pq=0xf524239f011e77fe&rsv_t=2e45mn%2BNozluV9%2FmM1X5M2ttO87SC22jDVYLAZYxpi3Bf%2FiwGF2wrXeMbMo9&rqlang=en&rsv_dl=tb&rsv_enter=1&rsv_sug3=12&rsv_sug1=11&rsv_sug7=100&rsv_sug2=0&rsv_btype=i&prefixsug=hello%2520world&rsp=6&inputT=6702&rsv_sug4=7944
+
+比如, 这里我们在百度的搜索栏中搜索"hello world", 就会有如上URL, 其中就有"hello%20world"这种字符串, 空格是个特殊字符, 所以被编码了, 变成了`%20`, 这个20是`%`字符的ASCII, 不过是十六进制的, 如果字符不能用ASCII表示, 比如中文这种宽字符, 先要把它, 如汉字"中"拆成合适的段(八个比特位作为一个段), `E4 B8 AD`, 之间用`%`相隔.
+
+对于编码的方法, 我们一般在网上复制一份现成的代码, 不过实际上, 我们一般也用不上.网上也有一些在线工具, 
+
+### HTTP的请求和响应
+
+HTTP的请求由多行构成, 其中的每一行都以`\r\n`为结尾(为字段分隔符), 第一行被叫做请求行, 下面的若干行被称为请求报头, 其中有许多kv形式的pair, 用于描述该请求的描述信息, 末尾是用户上传内容(正文), 这个不一定以`\r\n`为行结尾, 完全取决于用户到底传的是什么. 
+
+![image-20250402214135572](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402214135688.png)
+
+对于请求行来说, 它有三个成员, 成员之间以空格分割, 第一个成员描述了该请求的方法, 方法很多, 但我们几乎只用其中两种, 负责拉取的GET, 和负责拉取的POST, 接下来是URL, 这个URL一般是域名后面的URL,  然后就是协议版本. 比如HTTP/1.0,  HTTP/2.0
+
+为了区分请求报文和正文, 请求报头的最后一行是个空行, 当服务端把请求报头中的一行截取出来后, 发现, 这是一个空字符, 那就说明,请求报头没内容了, 接下来是正文部分.
+
+另外, 为了保证正文内容不残缺, 请求报文中就有描述正文字节量的pair(形式大概是"Content-Length: xx:), 它用这种方式确保正文完整之后再交给下一层, 就像我们之前请手写的自定义协议那样.
+
+还有, 之前我们写的自定义协议是报文准备完成后, 一次性发过去, 但HTTP一般不是一次性发, 而是一行一行发,
+
+HTTP的响应格式与请求格式大致相同, 由多行构成, 每行以`\r\n`结尾, 第一行被称为"状态行", 后面的若干行为响应报头, 其内容认识kv结构构成的集合, 其中也包含对于正文字节长度的描述, 报头之后是个空行, 之后便是正文, 正文的形式任由实际情况决定.
+
+![image-20250403135059541](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403135059601.png)
+
+接下来我们用`telnet`抓一份响应报文
+
+```shell
+[wind@starry-sky ~]$ telnet www.baidu.com 80
+Trying 180.101.49.44...
+Connected to www.baidu.com.
+Escape character is '^]'.
+^]
+telnet> 
+GET / HTTP/1.1
+
+HTTP/1.1 200 OK
+Accept-Ranges: bytes
+Cache-Control: no-cache
+Connection: keep-alive
+Content-Length: 29506
+Content-Type: text/html
+Date: Thu, 03 Apr 2025 05:56:41 GMT
+P3p: CP=" OTI DSP COR IVA OUR IND COM "
+P3p: CP=" OTI DSP COR IVA OUR IND COM "
+Pragma: no-cache
+Server: BWS/1.1
+Set-Cookie: BAIDUID=23355F1EDE3363147E9713EC7288B66F:FG=1; expires=Thu, 31-Dec-37 23:55:55 GMT; max-age=2147483647; path=/; domain=.baidu.com
+Set-Cookie: BIDUPSID=23355F1EDE3363147E9713EC7288B66F; expires=Thu, 31-Dec-37 23:55:55 GMT; max-age=2147483647; path=/; domain=.baidu.com
+Set-Cookie: PSTM=1743659801; expires=Thu, 31-Dec-37 23:55:55 GMT; max-age=2147483647; path=/; domain=.baidu.com
+Set-Cookie: BAIDUID=23355F1EDE336314195E7FA559FE391F:FG=1; max-age=31536000; expires=Fri, 03-Apr-26 05:56:41 GMT; domain=.baidu.com; path=/; version=1; comment=bd
+Traceid: 174365980106407250029233865127660922360
+Vary: Accept-Encoding
+X-Ua-Compatible: IE=Edge,chrome=1
+X-Xss-Protection: 1;mode=block
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta content="always" name="referrer" />
+    <meta
+        name="description"
+        content="全球领先的中文搜索引擎、致力于让网民更便捷地获取信息，找到所求。百度超过千亿的中文网页数据库，可以瞬间找到相关的搜索结果。"
+    />
+........ 后面省略
+```
+
+初期我们就看看状态行, 服务器发过来的状态行为
+
+```shell
+HTTP/1.1 200 OK
+
+```
+
+形式为   协议版本  状态码  状态码的文字描述     协议版本主要是为了依据客户端的实际情况, 为其提供符合版本的功能数据, 客户端的更新是要逐步进行的, 所以市面上会存在各种各样的客户端版本, 服务端都要兼容它们, 所以要有协议版本.     状态码描述响应的状态, 比如"404"就是我们平常经常见到的状态码, 状态码描述用于用文字描述状态码, 便于进行分析调试. 
+
+对于HTTP来说, 即使是错误的请求(即使索要的资源不存在), 它也会有对应的响应. 
+
+下面我们借助于`fiddler`看看HTTP的请求报文, `fiddler`是个抓包软件, 本来我们的请求是直接发到服务端那里, 但`fiddler`启动后, 就会拦截我们的请求报文, 然后再次包装, 再发给服务端, 服务端的请求, 也先到`fiddler`这里, 然后再由`fiddler`转交给需要的进程.
+
+![image-20250403142909006](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403142909137.png)
+
+![image-20250403142929312](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403142929375.png)
+
+不过这实际是HTTPS, 所以用的是443端口, 其内容是被加密的, 所以看不到具体内容.
+
+我们再换一个软件, `Postman`, `fiddler`相当于是代理, `Postman`是自己构建一个请求发给服务端, 它自己就相当于是浏览器. 
+
+![image-20250403143901834](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403143902028.png)
+
+上面是请求, 下面是响应, 不过它给我们的不是原始请求报文, 而是已经被分割好的, 但对于初学者来说, 我们需要看到原始报文, 所以这点不太好. 下面的是响应, 给了我们正文和渲染效果. 
+
+下面我们写一个简单的HTTP服务.
+
+```cpp
+#pragma once
+
+#include"log.hpp"
+#include"Sockst.hpp"
+#include<string>
+#include<pthread.h>
+#include<memory>
+#include<iostream>
+
+#define DEFAULT_POTR 8888
+#define BUFFER_SIZE 10240
+
+struct threadArgs
+{
+    int _sockfd;
+
+    threadArgs(int sockfd) :_sockfd(sockfd){};
+    ~threadArgs() {if(_sockfd > 0) close(_sockfd);}
+};
+
+class HttpServer
+{
+    public:
+    HttpServer(uint16_t port = DEFAULT_POTR) :_port(port) {};
+    void start()
+    {
+        _listensock.create_();
+        _listensock.reuse_port_address();
+        _listensock.bind_(_port);
+        _listensock.listen_();
+        print_netstat();
+
+        while(true)
+        {
+            std::string clientip;
+            uint16_t clientport;
+            int sockfd = _listensock.accept_(&clientip, &clientport);
+            if(sockfd == -1) continue;
+
+            pthread_t session; threadArgs* a = new threadArgs(sockfd);
+            pthread_create(&session, nullptr, threadRun, a);
+        }
+    }
+    ~HttpServer(){}
+    private:
+    static void* threadRun(void* args_)
+    {
+        pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+        std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+        ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+        if(n > 0)
+        {
+            buffer[n] = 0;
+            std::cout <<buffer;
+        }
+        return nullptr;
+    }
+
+
+    private:
+    socket_ _listensock;
+    uint16_t _port;
+    Log& _log = Log::getInstance();
+};
+```
+
+关于这份代码, 我们用`recv`平替了`read`, `recv`是专门用于读TCP这种面向字节流的传输层协议的. 它和`read`的用法几乎相同, 只不过末尾有个参数决定是否是阻塞读.   
+
+这次我们直接用浏览器访问
+
+![image-20250403162001278](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403162001419.png)
+
+```shell
+[wind@starry-sky HTTP]$ ./HttpServer
+(Not all processes could be identified, non-owned process info
+ will not be shown, you would have to be root to see it all.)
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.1:41067         0.0.0.0:*               LISTEN      25811/language_serv 
+tcp        0      0 0.0.0.0:111             0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8888            0.0.0.0:*               LISTEN      22979/./HttpServer  
+tcp        0      0 127.0.0.1:44633         0.0.0.0:*               LISTEN      25811/language_serv 
+tcp        0      0 127.0.0.1:25            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:46555         0.0.0.0:*               LISTEN      18354/code-ddc367ed 
+tcp        0      0 127.0.0.1:43836         0.0.0.0:*               LISTEN      25811/language_serv 
+tcp6       0      0 :::111                  :::*                    LISTEN      -                   
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+tcp6       0      0 ::1:25                  :::*                    LISTEN      -                   
+GET / HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Upgrade-Insecure-Requests: 1
+
+```
+
+我们看到, 浏览器对服务发了一个请求...
+
+只不过, 由于我们没写请求响应, 所以浏览器说"该网页无法正常运转"
+
+我们略微看一下报文
+
+```shell
+[wind@starry-sky HTTP]$ ./HttpServer
+(Not all processes could be identified, non-owned process info
+ will not be shown, you would have to be root to see it all.)
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.1:34754         0.0.0.0:*               LISTEN      28325/code-ddc367ed 
+tcp        0      0 0.0.0.0:111             0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8888            0.0.0.0:*               LISTEN      29702/./HttpServer  
+tcp        0      0 127.0.0.1:25            0.0.0.0:*               LISTEN      -                   
+tcp6       0      0 :::111                  :::*                    LISTEN      -                   
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+tcp6       0      0 ::1:25                  :::*                    LISTEN      -                   
+GET / HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Upgrade-Insecure-Requests: 1
+
+GET http://pingjs.qq.com/ping.js HTTP/1.1
+Host: pingjs.qq.com
+User-Agent: Mozilla
+If-Modified-Since: Thu, 02 Dec 2021 11:17:53 GMT
+
+GET / HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Upgrade-Insecure-Requests: 1
+
+```
+
+`GET / HTTP/1.1`中的`GET`不就是协议方法吗, `/`是`Web`根目录, `HTTP/1.1`是协议版本, 第二行`Host`可以定位一个具体服务器上的具体进程, 我们再看看`User-Agent`, 它描述的是客户端的平台, 比如, `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36`是我用Windows端的Chrome访问的, `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36`是我用Android端的Chrome访问的, 我手头上没苹果设备.
+
+我们稍微说说这个`User-Agent`到底是干什么用的, 它有两个应用, 一是确认用户的身份是否合法, 对于通过正常渠道访问的客户来说, 它都有这个信息, 但如果是爬虫, 它就一般没有这个信息, 它的身份是非法的, 我的服务端为了防爬, 可以判断一下用户请求报文中的`User-Agent`有没有, 如果有的话, 你再判断一下它看起来像不像假的. 没有或者是假的, 就把它踢出去. 
+
+二是, 服务端依据用户的平台, 进行个性化推荐, 比如, 我们在Windows的百度搜索"微信", 它知道我这是Windows, 所以会为我推荐Windows
+
+![image-20250404162535864](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404162535939.png)
+
+而我们在Android端的百度搜索"微信", 它弹出的就是Android版的.
+
+![0806e7bad23a1673e070207f0cf26ed9](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404162649163.jpg)
+
+我还是没有苹果, 所以就不看了.
+
+这是只是说一说, 这属于常识性知识.
+
+接下来我们来写个响应报文发回去.
+
+```cpp
+static void* threadRun(void* args_)
+{
+    pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if(n > 0)
+    {
+        buffer[n] = 0;
+        std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = "hello world"; // 发个"hello world"回去
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0);  // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+![image-20250404165144058](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404165144143.png)
+
+尽管这个"hello world"其貌不扬, 但是我们的第一步.
+
+我们再用`telnet`看看原始报文, 浏览器只显示正文部分, 所以看不到响应行和响应报头
+
+```shell
+[whisper@VM-12-6-centos ~]$ telnet 120.55.90.240 8888
+Trying 120.55.90.240...
+Connected to 120.55.90.240.
+Escape character is '^]'.
+^]
+telnet> 
+GET / HTTP/1.1  
+HTTP/1.0 200 OK
+Content-Length: 11
+
+hello worldConnection closed by foreign host.
+```
+
+下面, 我们把正文改一改, 不要只有一个字符串, 太空洞了, 不过我们目前的本职是后端, 正文是前端写的, 所以后面我们的正文主要借助于AI或者网络资源. 我们可以搜索`w3schools`这个网站, 它是一个非常知名的在线学习网站，主要专注于 **网页开发技术** 的教学。它特别适合初学者和中级开发者，尤其是像我们这样的后端开发者，想快速上手一些前端知识时，W3Schools 是个不错的资源。不过它是挪威的网站, 不过我们也有[中文的](https://www.w3school.com.cn/)
+
+![image-20250404170653886](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404170653990.png)
+
+网页是用`HTML`写的.  它实质是文本, 浏览器收到之后, 会依据它里面的描述进行渲染, 然后就有了我们见到的那些页面.
+
+我们先让AI写一份`HTML`, 分析一下`HTML`的大致结构
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>等待界面</title>
+    <style>
+        /* 居中布局 */
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f0f0f0; /* 浅灰背景 */
+            font-family: Arial, sans-serif;
+        }
+
+        /* 加载动画容器 */
+        .loader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px; /* 动画和文字间距 */
+        }
+
+        /* 旋转圆圈 */
+        .spinner {
+            width: 40px;
+            加载动画的样式 */
+            height: 40px;
+            border: 4px solid #3498db; /* 蓝色边框 */
+            border-top: 4px solid transparent; /* 透明顶部造成旋转效果 */
+            border-radius: 50%;
+            animation: spin 1s linear infinite; /* 旋转动画 */
+        }
+
+        /* 文字样式 */
+        .text {
+            color: #333;
+            font-size: 18px;
+        }
+
+        /* 动画关键帧 */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="loader">
+        <div class="spinner"></div>
+        <div class="text">加载中...</div>
+    </div>
+</body>
+</html>
+```
+
+最开始的这一行`<!DOCTYPE html>`表明的是`html`标准, 这里是`HTML5`标准, 然后我们可以看到`<html>`, 这是"根标签", 相当于后端的`{}`, 我们看到, 首尾各一个, 所有 HTML 内容都包裹在这个标签里，是整个文档的根。`lang="zh-CN"` 表示页面语言是中文（简体）.   `<head>`叫做"头部", 它里面存放页面的配置，不直接显示在页面上, 比如`<meta charset="UTF-8">`, 表明字符编码为` UTF-8`，这样能让中文字符正常显示, `<meta name="viewport" content="width=device-width, initial-scale=1.0">`, 适配移动设备，让页面宽度等于设备宽度，初始缩放为 1.0, 不写的话手机上可能显示乱. `<title>等待界面</title>`, 设置浏览器标签栏的标题.  `<style> ... </style>`负责控制页面外观, `<body>`就是正文了, 用户真正看的部分. 
+
+HTML 的格式特点是
+
+- **层次结构**：
+
+  - 标签嵌套，像树形结构：<html> 是根，<head> 和 <body> 是分支。
+  - 缩进不是必须的，但为了可读性（像我写的这样）通常会缩进。
+
+  **标签对称**：
+
+  - 除了少数自闭合标签（如 <meta>），大部分标签要成对出现。
+  - 忘了写结束标签（比如 </div>），可能会导致页面乱掉。
+
+  **属性**：
+
+  - 标签可以带属性，比如` lang="zh-CN"` 或 `class="loader"`，用` = `赋值，值通常加引号。
+  - 属性给标签加“特性”，类似函数参数。
+
+这都是AI说的, 我也不清楚.
+
+我们先不整这么多, 先大概写写, 把"hello world"渲染成标题形式.
+
+```cpp
+static void* threadRun(void* args_)
+{
+    pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if(n > 0)
+    {
+        buffer[n] = 0;
+        std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = "<html><body><h3>hello world</h3></body></html>"; // 发个"hello world"回去
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0);  // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+![image-20250404172828508](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404172828591.png)
+
+我们打开开发者模式, 就可以看到收到的`html`了, 前端就是写`html`, 我们后端是把`html`发过去, 并负责后端逻辑的, 所以一个前端一般对应3至5个后端
+
+```shell
+[whisper@VM-12-6-centos ~]$ telnet 120.55.90.240 8888
+Trying 120.55.90.240...
+Connected to 120.55.90.240.
+Escape character is '^]'.
+^]
+telnet> 
+GET / HTTP/1.1                                                                            
+HTTP/1.0 200 OK
+Content-Length: 46
+
+<html><body><h3>hello world</h3></body></html>Connection closed by foreign host.
+[whisper@VM-12-6-centos ~]$
+```
+
+在之前的请求中, 我们给的都是`Web`根目录, 其实我们也可以去其他目录, 比如我们在浏览器地址栏里输`120.55.90.240:8888/a/b/c/d.html`, 我们就可以收到这份报文
+
+```shell
+GET / HTTP/1.1
+GET /a/b/c/d.html HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Upgrade-Insecure-Requests: 1
+
+GET /favicon.ico HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Referer: http://120.55.90.240:8888/a/b/c/d.html
+
+```
+
+我们主要看第一份报文, 第二份报文在请求网站图标, 就是这种东西
+
+![image-20250404173957338](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404173957382.png)
+
+所以如果我们想有图标, 那就在`Web`根目录下放个`favicon.ico`
+
+接下来我们看看第一份报文, 第一份报文请求的是`/a/b/c/d.html`这个网页, 不过我们硬编码的, 所以没有反应. 之后我们可能是要返一个"404"的. 
+
+我们可以再给`URL`加点东西
+
+![image-20250404174655481](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404174655530.png)
+
+服务端也可以收到对应的信息
+
+```shell
+GET /a/b/c/d.html?username=wind&passwd=123 HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Upgrade-Insecure-Requests: 1
+
+GET /favicon.ico HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Referer: http://120.55.90.240:8888/a/b/c/d.html?username=wind&passwd=123
+```
+
+所以之后我们就可以把`URL`解析出来, 根据它的路径, 找到资源, 发回去. 
+
+接下来我们就要看看`Web`根目录,  这个`Web`根目录其实没什么特别的, 一般情况下, 对于正式的服务, 一般就是根目录, 但实际上, 它可以为任意位置, 关键在于如何解析它, 比如, 如果我们把这个路径拼接到当前进程的工作路径, 那工作路径就是`Web`根路径, 其实就是看前面是怎么拼接的. 
+
+比如, 我们在项目路径下加个`wwwroot`文件夹, 作为我们的`Web`根目录,
+
+![image-20250404180003029](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404180003591.png)
+
+将来我们的所有网络资源, 页面, 音频, 图片, 都会放在这里, 之后你把用户发来的路径拼到`wwwroot`路径下就行了
+
+接下来我们在`wwwroot`里加个首页`html`文件, 用`AI`写的那份`html`, 
+
+```shell
+[wind@starry-sky HTTP]$ ls -al
+total 168
+drwxrwxr-x 4 wind wind   4096 Apr  4 17:59 .
+drwxrwxr-x 6 wind wind   4096 Apr  2 19:27 ..
+-rwxrwxr-x 1 wind wind 129176 Apr  4 17:27 HttpServer
+-rw-rw-r-- 1 wind wind     87 Apr  3 15:44 HttpServer.cc
+-rw-rw-r-- 1 wind wind   2278 Apr  4 17:26 HttpServer.hpp
+-rw-rw-r-- 1 wind wind   5121 Apr  3 14:52 log.hpp
+-rw-rw-r-- 1 wind wind    455 Apr  3 15:47 makefile
+-rw-rw-r-- 1 wind wind   3487 Apr  3 14:52 Sockst.hpp
+drwxrwxr-x 2 wind wind   4096 Apr  3 15:38 .vscode
+drwxrwxr-x 2 wind wind   4096 Apr  4 18:03 wwwroot
+[wind@starry-sky HTTP]$ cd wwwroot
+[wind@starry-sky wwwroot]$ tree .
+.
+└── index.html
+
+0 directories, 1 file
+[wind@starry-sky wwwroot]$
+```
+
+ 页面已经写成文件了, 我们写个函数, 把文件读出来, 写到`HTTP`正文上. 
+
+```cpp
+std::string readHtml(const char* resource_path)
+{
+    std::ifstream in(resource_path);
+    std::string result, line;
+    while(std::getline(in, line))
+        result += line;
+    in.close();
+    return result;
+}
+
+static void* threadRun(void* args_)
+{
+    pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if(n > 0)
+    {
+        buffer[n] = 0;
+        std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml("wwwroot/index.html");
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0);  // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+此时, 再进行访问就能看到相应的效果
+
+![image-20250404194653937](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404194654086.png)
+
+不过我们这里, 路径目前是写死的, 将来我们会对用户发来的路径解析, 拼接成一个合法的路径. 下面, 我们就写个函数解析一下收到的请求报文, 并把用户给的路径拿出来. 我们要把用户给的路径拼接成`wwwroot/xxx/xxxx/xxx`的形式, 另外, 还需要说一句, 对于`Web`根目录, `/`, 如果用户给的是这个路径, 那就给它展示首页. 
+
+我们这里定义了一个宏`#define WEB_ROOT "wwwroot"`, 标记`Web`根目录,在哪里, 但其实上一般不是定义宏, 而是把一些路径写在配置文件里, 然后安排一个初始化类对象读配置文件, 可能这个初始化类对象里有个`std::string`, 配置文件选择谁是`Web`根目录, 谁就是`Web`根目录, 之后进程需要`Web`根目录路径, 就从初始化类里访问, 是这种形式, 不是用宏, 我这里用宏是图省事, 学习项目, 用不着这样, 配置文件方案的另一个好处是可以无缝修改根目录, 直接改文件就行了.
+
+下面我们写一个`class HttpRequest`, 用来进行请求报文解析
+
+```cpp
+#define HTTP_HEADER_DELIMITER "\r\n"
+class HttpRequest
+{
+    public:
+    void init(std::string req)
+    {
+        while(true)
+        {
+            size_t pos = req.find(HTTP_HEADER_DELIMITER);
+            if(pos == std::string::npos) break;
+            std::string temp = req.substr(0, pos);
+            if(temp.empty()) break;
+            _req_header.emplace_back(temp);
+            req.erase(0, pos + strlen(HTTP_HEADER_DELIMITER));
+        }
+        _body = req;
+    }
+
+    void print()
+    {
+        std::cout<<"--------------------"<<std::endl;
+        for(const auto& e: _req_header)
+        {
+            std::cout<<e<<HTTP_HEADER_DELIMITER;
+        }
+        std::cout<<_body <<std::endl;
+    }
+    private:
+    std::vector<std::string> _req_header;   // 把非正文部分以每行为单位, 存在数组里
+    std::string _body;                      // 存正文
+};
+
+static void* threadRun(void* args_)
+{
+    pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if(n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml("wwwroot/index.html");
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0);  // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+```shell
+[wind@starry-sky HTTP]$ ./HttpServer
+(Not all processes could be identified, non-owned process info
+ will not be shown, you would have to be root to see it all.)
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 0.0.0.0:111             0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:40500         0.0.0.0:*               LISTEN      9230/node           
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:8888            0.0.0.0:*               LISTEN      19442/./HttpServer  
+tcp        0      0 127.0.0.1:25            0.0.0.0:*               LISTEN      -                   
+tcp        0      0 127.0.0.1:35357         0.0.0.0:*               LISTEN      10262/node          
+tcp6       0      0 :::111                  :::*                    LISTEN      -                   
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+tcp6       0      0 ::1:25                  :::*                    LISTEN      -                   
+--------------------
+GET / HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Cache-Control: max-age=0
+Upgrade-Insecure-Requests: 1
+
+
+--------------------
+GET /favicon.ico HTTP/1.1
+Host: 120.55.90.240:8888
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36
+Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+Referer: http://120.55.90.240:8888/
+
+```
+
+接下来我们再对第一行, 也就是请求行进行处理, 把里面的组分, 比如用户请求路径, 协议版本什么的.
+
+由于第一行以空格为分隔符, 而C/C++也默认空格为分隔符, 所以我们用`stringstream`来进行分割, 为了便于调试, 我们也更新了`print`
+
+```cpp
+class HttpRequest
+{
+public:
+    void init(std::string req)
+    {
+        while (true)
+        {
+            size_t pos = req.find(HTTP_HEADER_DELIMITER);
+            if (pos == std::string::npos)
+                break;
+            std::string temp = req.substr(0, pos);
+            if (temp.empty())
+                break;
+            _req_header.emplace_back(temp);
+            req.erase(0, pos + strlen(HTTP_HEADER_DELIMITER));
+        }
+        _body = req;
+    }
+
+    void parse()
+    {
+        std::string temp;
+        std::stringstream ss(_req_header[0]);
+        ss >> method_ >> url_ >> http_version_;
+    }
+
+    //AI以我的原型代码改出来的
+    void print()
+    {
+        // 彩色打印标题
+        std::cout << "\033[1;36m" // 亮青色
+                  << "╔════════════════ HTTP REQUEST ════════════════╗"
+                  << "\033[0m" << std::endl;
+
+        // 基本信息（加粗显示）
+        std::cout << "\033[1;33m" // 亮黄色
+                  << "│ Method: \033[1;37m" << method_ << "\033[0m" << std::endl;
+        std::cout << "\033[1;33m│ Url :   \033[1;37m" << url_ << "\033[0m" << std::endl;
+        std::cout << "\033[1;33m│ HTTP:   \033[1;37m" << http_version_ << "\033[0m" << std::endl;
+
+        // 请求头（跳过第一个）
+        if (!_req_header.empty())
+        {
+            std::cout << "\033[1;33m├────────── Headers ───────────\033[0m" << std::endl;
+            for (auto it = std::next(_req_header.begin()); it != _req_header.end(); ++it)
+            {
+                std::cout << "│ \033[34m" << *it << "\033[0m" << HTTP_HEADER_DELIMITER << std::endl;
+            }
+        }
+
+        // 请求体（如果有）
+        if (!_body.empty())
+        {
+            std::cout << "\033[1;33m├────────── Body ──────────────\033[0m" << std::endl;
+            std::cout << "│ " << _body << std::endl;
+        }
+
+        // 底部边框
+        std::cout << "\033[1;36m"
+                  << "╚══════════════════════════════════════════════╝"
+                  << "\033[0m" << std::endl;
+    }
+
+    // void print()
+    // {
+    //     std::cout << "--------------------" << std::endl;
+    //     auto it = _req_header.begin();
+    //     ++it;
+    //     std::cout << "method       : " << method_ << std::endl;
+    //     std::cout << "url          : " << url_ << std::endl;
+    //     std::cout << "http_version : " << http_version_ << std::endl;
+    //     while (it != _req_header.end())
+    //     {
+    //         std::cout << *it << HTTP_HEADER_DELIMITER;
+    //         ++it;
+    //     }
+    //     std::cout << _body << std::endl;
+    // }
+
+private:
+    std::vector<std::string> _req_header; // 把非正文部分以每行为单位, 存在数组里
+    std::string _body;                    // 存正文
+
+    std::string method_;				 // 请求方式
+    std::string url_;					 // 略去域名的url
+    std::string http_version_;			  // 协议版本
+};
+
+
+static void* threadRun(void* args_)
+{
+    pthread_detach(pthread_self());  char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs*>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if(n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml("wwwroot/index.html");
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0);  // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+这效果确实挺好
+
+![image-20250405170917990](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405170918094.png)
+
+另外, 我们看到, 它默认请求`Web`根目录路径, 但一般来说, 对于这种直接请求根目录的行为, 我们一般是把首页发过来, 而不是把根目录下的所有东西发过去. 
+
+下面, 我们在`parse`里将存储在`url`中的路径截取出来, 并进行修正, 原先的`url_`中只保留搜索字符串的信息, 为此我们将其更名为`url_query_`, 另外对打印效果进行了进一步更新
+
+```cpp
+class HttpRequest
+{
+public:
+    void init(std::string req)
+    {
+        while (true)
+        {
+            size_t pos = req.find(HTTP_HEADER_DELIMITER);
+            if (pos == std::string::npos)
+                break;
+            std::string temp = req.substr(0, pos);
+            if (temp.empty())
+                break;
+            _req_header.emplace_back(temp);
+            req.erase(0, pos + strlen(HTTP_HEADER_DELIMITER));
+        }
+        _body = req;
+    }
+
+    void parse()
+    {
+        std::string temp;
+        std::stringstream ss(_req_header[0]);
+        ss >> method_ >> url_query_ >> http_version_;
+        size_t pos = url_query_.find('?');
+        if (pos == std::string::npos)
+            temp = url_query_;
+        temp = url_query_.substr(0, pos);
+        url_query_.erase(0, pos);
+        if (temp == "/")
+        {
+            path_ = HOME_PAGE;
+        }
+        else
+        {
+            path_ += WEB_ROOT;
+            path_ += temp;
+        }
+    }
+
+    // AI以我的原型代码改出来的
+    void print()
+    {
+        // 标题（亮青色+下划线）
+        std::cout << "\033[1;4;36m" // 亮青色+粗体+下划线
+                  << "HTTP Request Details"
+                  << "\033[0m" << std::endl
+                  << std::endl;
+
+        // 元信息（黄色标签+白色值）
+        std::cout << "\033[33mMethod: \033[37m" << method_ << std::endl
+                  << "\033[33mPath:   \033[37m" << path_ << std::endl
+                  << "\033[33mHTTP:   \033[37m" << http_version_ << std::endl
+                  << "\033[33mQuery:  \033[37m" << (url_query_.empty() ? "(empty)" : url_query_) << std::endl;
+
+        // 请求头（品红色标题+绿色内容）
+        if (!_req_header.empty())
+        {
+            std::cout << std::endl
+                      << "\033[35m" << "── Headers ──" << "\033[0m" << std::endl;
+            for (auto it = std::next(_req_header.begin()); it != _req_header.end(); ++it)
+            {
+                std::cout << "\033[32m" << *it << HTTP_HEADER_DELIMITER << "\033[0m" << std::endl;
+            }
+        }
+
+        // 请求体（橙色标题+灰色内容）
+        if (!_body.empty())
+        {
+            std::cout << std::endl
+                      << "\033[38;5;208m" << "── Body ──" << "\033[0m" << std::endl
+                      << "\033[90m" << _body << "\033[0m" << std::endl;
+        }
+
+        // 结尾线
+        std::cout << "\033[90m" << "────────────────────" << "\033[0m" << std::endl;
+    }
+
+    // void print()
+    // {
+    //     std::cout << "--------------------" << std::endl;
+    //     auto it = _req_header.begin();
+    //     ++it;
+    //     std::cout << "method       : " << method_ << std::endl;
+    //     std::cout << "path         : " << path_ << std::endl;
+    //     std::cout << "http_version : " << http_version_ << std::endl;
+    //     std::cout << "url_query    : " << url_query_ << std::endl;
+    //     while (it != _req_header.end())
+    //     {
+    //         std::cout << *it << HTTP_HEADER_DELIMITER;
+    //         ++it;
+    //     }
+    //     std::cout << _body << std::endl;
+    // }
+
+private:
+    std::vector<std::string> _req_header; // 把非正文部分以每行为单位, 存在数组里
+    std::string _body;                    // 存正文
+
+    std::string method_;
+    std::string url_query_;
+    std::string http_version_;
+
+    std::string path_;
+};
+```
+
+我们看到, 效果还是非常好的
+
+![image-20250405172911668](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405172911757.png)
+
+![image-20250405173147904](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405173148007.png)
+
+在这之后, 我们就可以根据用户的请求动态调整页面了, 而不是像以前那样写死.
+
+为了快速搭建一定的文件层次结构, 可以在`web`根目录下执行以下脚本
+
+```shell
+#!/bin/bash
+
+# 定义要创建的目录结构
+DIRS=(
+    "css"
+    "js"
+    "images"
+    "assets/fonts"
+    "assets/icons"
+    "pages/about"
+    "pages/contact"
+    "posts/2023"
+)
+
+# 定义要创建的基本HTML文件
+FILES=(
+    "index.html"
+    "about.html"
+    "contact.html"
+    "404.html"
+    "css/style.css"
+    "js/main.js"
+    "posts/2023/post1.html"
+    "posts/2023/post2.html"
+)
+
+# 创建目录
+echo "创建目录结构..."
+for dir in "${DIRS[@]}"; do
+    mkdir -p "$dir"
+    echo "  + $dir/"
+done
+
+# 创建文件并写入基本HTML结构
+echo "生成HTML文件..."
+for file in "${FILES[@]}"; do
+    cat <<EOF > "$file"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${file%.*}</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <h1>${file%.*} Page</h1>
+    <p>This is a generated test file: $file</p>
+    <script src="/js/main.js"></script>
+</body>
+</html>
+EOF
+    echo "  + $file"
+done
+
+# 创建示例图片
+echo "生成占位图片..."
+convert -size 100x100 xc:gray images/placeholder1.jpg 2>/dev/null ||
+    echo "  ! 需要安装ImageMagick生成图片，跳过"
+convert -size 200x150 xc:blue images/placeholder2.png 2>/dev/null ||
+    echo "  ! 需要安装ImageMagick生成图片，跳过"
+
+echo "完成！生成的文件结构："
+tree -L 3
+```
+
+```shell
+[wind@starry-sky HTTP]$ ls
+HttpServer  HttpServer.cc  HttpServer.hpp  log.hpp  makefile  Sockst.hpp  wwwroot
+[wind@starry-sky HTTP]$ cd wwwroot
+[wind@starry-sky wwwroot]$ ls
+cosmic_404.html  generate_web_structure.sh  index.html
+[wind@starry-sky wwwroot]$ ./generate_web_structure.sh
+-bash: ./generate_web_structure.sh: Permission denied
+[wind@starry-sky wwwroot]$ bash ./generate_web_structure.sh
+创建目录结构...
+  + css/
+  + js/
+  + images/
+  + assets/fonts/
+  + assets/icons/
+  + pages/about/
+  + pages/contact/
+  + posts/2023/
+生成HTML文件...
+  + index.html
+  + about.html
+  + contact.html
+  + 404.html
+  + css/style.css
+  + js/main.js
+  + posts/2023/post1.html
+  + posts/2023/post2.html
+生成占位图片...
+  ! 需要安装ImageMagick生成图片，跳过
+  ! 需要安装ImageMagick生成图片，跳过
+完成！生成的文件结构：
+.
+├── 404.html
+├── about.html
+├── assets
+│   ├── fonts
+│   └── icons
+├── contact.html
+├── cosmic_404.html
+├── css
+│   └── style.css
+├── generate_web_structure.sh
+├── images
+├── index.html
+├── js
+│   └── main.js
+├── pages
+│   ├── about
+│   └── contact
+└── posts
+    └── 2023
+        ├── post1.html
+        └── post2.html
+
+11 directories, 10 files
+[wind@starry-sky wwwroot]$
+```
+
+下面我们再把之前的`readHtml`改一改, 没有对应文件跳到`cosmic_404.html`.
+
+```cpp
+#define COSMIC_404 "wwwroot/cosmic_404.html"
+std::string readHtml(const std::string& resource_path)
+{
+    std::ifstream in(resource_path.c_str());
+    if(!in) in.open(COSMIC_404);  // operator bool 重载, 打开失败返回假
+    std::string result, line;
+    while (std::getline(in, line))
+        result += line;
+    in.close();
+    return result;
+}
+
+static void *threadRun(void *args_)
+{
+    pthread_detach(pthread_self());
+    char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        // req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml(req.getPath());
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+下面可以根据这些测试用例进行测试, 可能有些测试无法通过, 不用担心, 这是正常现象, 因为上面`readHtml`写法其实是有坑的, 这个坑我们之后再说.
+
+| 输入的 URL 路径          | 预期现象                                                     |
+| ------------------------ | ------------------------------------------------------------ |
+| `/` 或 `/index.html`     | 正常显示 `index.html` 内容                                   |
+| `/about.html`            | 正常显示 `about.html` 内容                                   |
+| `/contact.html`          | 正常显示 `contact.html` 内容                                 |
+| `/posts/2023/post1.html` | 正常显示 `posts/2023/post1.html` 内容                        |
+| `/assets/fonts/`         | ▶ 跳转到 `cosmic_404.html`（目录下无默认文件如 `index.html`） |
+| `/nonexistent.html`      | ▶ 跳转到 `cosmic_404.html`（文件不存在）                     |
+| `/pages/about/`          | ▶ 跳转到 `cosmic_404.html`（目录下无 `index.html`）          |
+| `/images/phantom.jpg`    | ▶ 跳转到 `cosmic_404.html`（文件不存在）                     |
+| `/css/style.css`         | 正常返回 CSS 文件内容（若文件存在）                          |
+| `/js/main.js`            | 正常返回 JS 文件内容（若文件存在）                           |
+| `/404.html`              | 直接显示 `404.html` 内容（不触发自动跳转）                   |
+| `/cosmic_404.html`       | 直接显示太空主题 404 页面（手动访问不触发跳转）              |
+
+下面我们说一下`html`中的一些知识, 一般来说, 页面里或多或少都有几个跳转按钮, 点了之后, 就能跳转到相应的页面, 比如我们的`cosmic_404.html`就有一个跳转, 可以返回我们的首页
+
+![image-20250405184145074](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405184145188.png)
+
+页面跳转的`html`标签是这样的`<a href="/" class="home-btn">返回安全地带</a>`
+
+`href`后面的就是要调跳转到的页面地址, 如果你什么都没有, 只有路径, 那么, 它就会默认继续使用当前的`IP`端口, 如果你写了`https://www.baidu.com/`, 那就会跳到百度首页.
+
+![image-20250405184915795](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405184915961.png)
+
+### HTTP的方法
+
+HTTP有如下方法:
+
+![image-20250405203314795](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405203314978.png)
+
+不过我们一般只能看到`GET`和`POST`, `GET`就是获得服务器上的资源, `POST`也有类似于`GET`的功能, 不过它更多的是把本地资源传到服务器上, `PUT`正如这张图所说, 传输文件, `HEAD`的意思就是我不要正文, 你服务器只要发响应行和响应报头就行了, `DELETE`是删除文件, 但由于存在明显的安全问题, 所以一般来说, 都会被关掉, `OPTIONS`询问服务器支持那些方法, 会以正文的形式返回到客户端, `CONNECT`我们在`fiddler`那里见过, 是连接代理的, 其它的就不说了.
+
+我们这里只稍微说说`GET`和`	POST`. 我们上面说过, `POST`是向服务器提交数据, 那我们平时都是怎么提交数据的呢? 答案是表单, 什么是表单, 表单是前端的概念, 像什么搜索框, 
+
+![image-20250405204337434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405204337592.png)
+
+登录框(就这样叫吧)
+
+![image-20250405204443586](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405204443767.png)
+
+还有其他类似的东西
+
+表单, 在`html`里大概长这样
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>简单登录表单</title>
+</head>
+<body>
+    <form action="/login" method="POST">
+        <label for="username">用户名:</label>
+        <input type="text" id="username" name="username" /><br/>
+        
+        <label for="password">密码:</label>
+        <input type="password" id="password" name="password" /><br/>
+        
+        <input type="submit" value="登录" />
+    </form>
+</body>
+</html>
+```
+
+被`<form`和`</form>`包围的那部分就是表单, `action="/login"    method="POST"`的意思是往服务器`/login`路径下发请求, 这个请求的方法是`POST`,  如果里不写`method`, 浏览器默认使用`GET`,  `label`是文本提示信息, 提升用户体验的, `input`是读用户输入, 它末尾的`name`的值, 比如`username`, 就相当于`key`, 用户输入的信息就是`val`, 所以等会我们做实验会看到, 如果第一个框你填的是"张三", 那就会有"username=张三"这种pair,  那个`type, id, name`什么东西的, 可以理解属性描述符,解释属性用的,  最后一个`input`没有`name`, 所以生成不了`k-v`只是一个事件触发按钮, 点下它, 浏览器就会向服务器发报文.
+
+`/login`一般是某个程序, 服务端可能会以`fork`和进程替换的方式把用户的输入内容输到这个程序里, 程序给服务段处理结果, 服务端再把结果交给用户什么的.
+
+![image-20250405214104298](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405214104426.png)
+
+我这里说表单, 其真正目的是为了展示`GET`和`POST`的不同, 现在我们是`POST`方法, 提交一下, 看看服务器打印的报文
+
+![image-20250406154203310](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250406154203428.png)
+
+我们看到. 它这个`k-v`值是放在正文里面的, 如果我把表单的方法改成`"GET"`又会怎样呢?
+
+![image-20250406154600019](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250406154600116.png)
+
+此时我们就可以看到, 已经没有`Content-Length`字段了, 也就是没有正文了, `k-v`是以搜索字符串的形式被拼到`url`上的.
+
+和`POST`相比`GET`隐私性更差, 比如密码登录的时候, 如果用`GET`, 密码就会回显到`url`上, 所以就不太好, 就信息安全角度来说, `ROST`和`	GET`都不安全, 因为报文都是明码发的, 只要有心, 都能直接获取, 而且可以直接查看.  如果你想保证安全性, 那要用`https`, 之后我们会说.
+
+### HTTP的状态码
+
+状态码, 位于相应行的第二列, 用来表示响应的状态
+
+![image-20250407164854306](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407164854416.png)
+
+`1`开头的比较少见, 它一般用在这种场景下: 用户的请求需要处理一段时间, 为了让页面有反应, 先发一个等待页面, 向用户表示, 请求已经接收到了, 现在正在处理.   以`2`为开头的表示请求正常处理, 在上面的代码中, 我们就把状态码写死成了`200`,即使是`404`界面, 用的仍然是`200`, 这并不规范, 所以等会儿我们会改, `4`开头的, 表示客户端发出了逻辑上不应该发出的请求, 比如, 请求服务端没有的资源, 也就是`404`,还有一个是`403`, 表示用户没有足够的权限获得资源 `5`开头的, 表示服务端本身出问题了, 可能是线程, 进程创建失败了, 无法给用户开一个新会话, 从而无法处理请求, 或者 什么数据库坏了, 查不了数据之类的, `3`开头的等会儿我们再说, 状态码我们不需要记, 只要了解就行了.
+
+下面我们改一下之前的代码, 不把状态码写死, 
+
+```cpp
+std::string readHtml(const std::string& resource_path)
+{
+    std::ifstream in(resource_path.c_str());
+    if(!in.is_open()) return std::string();
+    std::string result, line;
+    while(std::getline(in, line))
+        result += line;
+    in.close();
+    return result;
+
+    // std::ifstream in(resource_path.c_str());
+    // if(!in) in.open(COSMIC_404);  // operator bool 重载, 打开失败返回假
+    // std::string result, line;
+    // while (std::getline(in, line))
+    //     result += line;
+    // in.close();
+    // return result;
+}
+
+static void *threadRun(void *args_)
+{
+    pthread_detach(pthread_self());
+    char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    // std::cout << n << std::endl;
+    if (n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml(req.getPath());
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        if(body.empty())
+        {
+            body = readHtml(COSMIC_404);
+            response_line = "HTTP/1.0 404 Not Found\r\n";
+        }
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+        std::cout << response<<std::endl;
+    }
+    return nullptr;
+}
+```
+
+测试一下, 就会发现服务端确实发回了一份`404`状态码的报文
+
+![image-20250407172459275](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407172459401.png)
+
+`404`并不是说页面不响应, 还是要有反应的, 告知用户请求的资源是不存在的.
+
+有的服务端并不严格遵循状态码, 可能什么页面都用`200`, 就像我们之前写的那样, 但我们不推荐这样做, 我们写服务的话, 当然都要考虑一下.
+
+### HTTP常见Header
+
+上面我们并没有说以`3`为开头的状态码, 这是因为`3`开头的, 往往要搭配请求报头中的`Location`使用, `3`开头的系列状态码是一个重点, 主要用于页面重定向, 分为两种, 一是临时重定向, 二是永久重定向, 
+
+重定向的使用场景主要是这样的: 浏览器, 或者 客户端, 向服务端发出了一个请求, 服务端发现, 自己可能因为某些原因无法处理这些请求, 但它知道另一台服务器上的服务可以处理这个请求, 所以就会给浏览器发一份`3`开头系列状态码的响应报文, 这个报文的报头里有一个字段, 大概这样`Location: www.XXX.com`, 浏览器收到之后, 就会对`www.XXX.com`这个服务器重新发送请求, 让这台服务器来处理. 
+
+下面我们就用代码实验一下.
+
+```cpp
+static void *threadRun(void *args_)
+{
+    pthread_detach(pthread_self());
+    char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    // std::cout << n << std::endl;
+    if (n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml(req.getPath());
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        if(body.empty())
+        {
+            body = readHtml(COSMIC_404);
+            response_line = "HTTP/1.0 404 Not Found\r\n";
+        }
+        response_line = "HTTP/1.0 302 Found\r\n";               // 硬编码
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "Location: https://www.qq.com";
+        response_header += "\r\n"; // 把"Location"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+        std::cout << response<<std::endl;
+    }
+    return nullptr;
+```
+
+现在我们只要一访问, 就会被重定向到腾讯官网.
+
+另外我们也可以看到, 有这个字段的话, 浏览器就会忽略初始服务器的正文内容
+
+![image-20250407180228833](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407180228987.png)
+
+重定向又可以被细分为"临时重定向"和"永久重定向两种", 拿生活中的例子, 你喜欢去一家饭馆, 有一天, 你去饭馆, 发现门上贴条告示, "本店正在升级装修, 已临时移到某某地方",这就是临时重定向, 于是你就去那个"某某地方了", 饭馆在新位置吸引到了一些新客户, 有一天, 原位置装修好了, 要搬回去, 但怕那些新客户找不到店面, 于是在门上说, "本店原址已经装修完毕, 现在迁回去了, 原址在哪里哪里", 于是那些新用户就知道, 以后就再也不用来这个地方了, 这就是"永久重定向"
+
+有时候服务器已经很老了, 它上面的服务实际上已经迁到了另一个服务器上, 域名也重新换了一个, 但很多人只知道旧域名, 所以就可以在这个旧服务器上只部署一个服务, 告诉浏览器, 给用户发个通知页面, 什么该网站已经永久迁移, 几秒钟之后自动跳到新的页面之类.
+
+接下来我们说`"Content-Length"`这个字段, 这个我们用的已经很久了, 客户端和服务端都会用, 用来描述正文的字节数. `Host` 字段, 用来定位服务端的IP和端口, `User-Agent`字段我们已经说过, 代表客户的操作系统和浏览器信息, `Referer`字段是用来支持页面前翻后翻的, 客户端本来在A页面, 向服务端请求B页面, 服务端在响应的时候就会添加`Referer`字段, 正文给B页面, 这样客户端来到B页面之后就能快速回到之前的A页面, 
+
+有时候我们还会看到`Connection: keep-alive`, 在说这个字段前, 我们先来说一下有关HTTP的背景知识, 在早期的HTTP, 使用的是所谓"短连接"的方式, 这个短连接就类似于我们之前写自定义协议的那种方式, 就是一个会话在提供完用户请求的资源后立刻关闭, 需要说明的是, 有些页面上可能还有多份资源, 比如若干张照片, 动图, 甚至视频, 此时如果采用短连接, 由于短连接每次只发送一份资源, 所以可能的情况是, 服务端先把页面HTML文本发过去, 然后浏览器发现HTML文本里有些路径, 标识着服务端中的其它资源, 于是浏览器会再次与服务端连接, 然后拿到一份资源, 然后连接再次关闭, 浏览器再次申请.... 直到把所有资源都申请完, 在互联网早期, 这种方式还是不错的, 但随着网络的发展, 经常会出现许多很大的页面, 里面有很多资源, (比如, 京东这种购物平台, 哔哩哔哩这种流媒体), 如果还采用短连接, 因为资源数量太多了, 所以就很拖效率, 因此就有了长连接方案, 在长连接方案中, 在一个会话里, 客户端和服务端会进行多次通信, 服务端会把页面上的资源再一个会话里, 一个个发给客户端, 而不必再建立新的会话, 资源发完再关闭会话.
+
+至于这个`Connection: keep-alive`, 其实就是客户端和服务端正在进行协商, 因为客户端和服务端双方的版本很可能不一致, 因此对于协议的支持程度也是不同的, 只有双方都支持长连接, 双方才能使用长连接, 如果请求报文里有这个字段, 就意味着, 客户端支持长连接, 并请求进行长连接, 如果响应报文里也有这个字段, 就意味着, 服务端也支持长连接, 允许进行长连接通信, 于是客户端和服务端就可以用长连接方式通信了.
+
+有时候我们还会看到`Upgrade`开头的字段, 比如`Upgrade-Insecure-Requests: 1`, `Upgrade`的字段是由于协议升级请求的, 具体有很多种升级方向, 比如`Upgrade-Insecure-Requests: 1`的意思是说, 现在我们是用HTTP协议进行通信的, 但HTTP用的是明文, 不太好, 我们能不能升级到HTTPS协议, 如果服务端支持HTTPS, 那就可以再发回去, 表明, 服务端可以将协议升级为HTTPS, 除此之外, 我们之前接触到的网络通信都是CS模式, 所谓CS模式就是服务端等待客户端的请求, 这种模式已经可以满足绝大多数的网络通信需求了, 但在一些情况下, 需要服务端与客户端平等交流, 甚至服务端找客户端, 此时就需要升级协议.
+
+下面, 我们通过代码, 来看一下短连接.
+
+其实把之前那个重定向代码注释一下, 然后改一下首页就行了
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>index</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <h1>index Page</h1>
+    <p>This is a generated test file: index.html</p>
+    <script src="/js/main.js"></script>
+    <img src="images/1.jpg" alt="表情包一" width="500" height="500">
+    <img src="images/2.jpg" alt="表情包二" width="300" height="300">
+</body>
+</html>
+```
+
+```shell
+# 在images文件夹下准备了两副照片
+[wind@starry-sky HTTP]$ ls wwwroot/images
+1.jpg  2.jpg
+[wind@starry-sky HTTP]$
+```
+
+我们用浏览器重新登录一下, 会发现, 没有照片, 但根据服务端的打印来看, 照片应该发出去了
+
+![image-20250407214502872](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407214503208.png)
+
+只不过因为照片是二进制文件, 所以都是乱码.
+
+不过我既然发出去了, 为什么浏览器不渲染呢? 有两个原因, 我们先说第一种, 这种方法比较好察觉, 那就是我们读文件有问题, 
+
+```cpp
+std::string readHtml(const std::string& resource_path)
+{
+    std::ifstream in(resource_path.c_str());
+    if(!in.is_open()) return std::string();
+    std::string result, line;
+    while(std::getline(in, line))
+        result += line;
+    in.close();
+    return result;
+}
+```
+
+我们这里用的是文本形式读, 但图片是二进制文件, 所以我们应该用二进制的方式去读, 二进制读取的另一个好处是在编码方式正确的前提下, 也可以支持文本文件的读取
+
+```cpp
+std::string readHtml(const std::string& resource_path)
+{
+    std::ifstream in(resource_path.c_str(), std::ios::binary);
+    if(!in.is_open()) return std::string();
+    in.seekg(0, std::ios::end);                                     // 将文件指针移到文件末尾
+    size_t size = in.tellg();                                       // 获取当前文件指针距离文件开头的偏移量
+    in.seekg(0, std::ios::beg);                                     // 将文件指针重新移到开头
+
+    std::string result(size, ' ');
+    in.read(const_cast<char*>(result.c_str()), size);               // 把文件读到缓冲区
+    in.close();
+    return result;
+}
+```
+
+改了之后我们发现加载出来了
+
+![image-20250408130800341](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408130800494.png)
+
+但其实上, 这是侥幸, 文件有很多种, 有文本, 有图片, 有视频, 音频, 浏览器怎么知道正文里的究竟是什么文件, 而且, 即使单对照片来说, 还有`.jpg, .png....`等形式, 浏览器它不一定能仅靠正文内容分析出来文件的具体种类和具体格式, 为此, 我们需要在响应报头里再加一个字段, 那就是`Content-Type`字段, 你问这里为什么,能加载出来? 我只能说, 可能是Chrome很强大, 它单靠正文自己分析出了正确的格式,不过我们该加还是要加的, 以下是`Content-Type`对照表
+
+| 文件种类      | 文件扩展名  | Content-Type（MIME 类型）              |
+| ------------- | ----------- | -------------------------------------- |
+| HTML 文件     | .html, .htm | text/html                              |
+| CSS 样式表    | .css        | text/css                               |
+| JavaScript    | .js         | application/javascript                 |
+| JSON 数据     | .json       | application/json                       |
+| XML 数据      | .xml        | application/xml 或 text/xml            |
+| JPEG 图片     | .jpg, .jpeg | image/jpeg                             |
+| PNG 图片      | .png        | image/png                              |
+| GIF 图片      | .gif        | image/gif                              |
+| SVG 向量图    | .svg        | image/svg+xml                          |
+| ICO 图标      | .ico        | image/x-icon                           |
+| PDF 文档      | .pdf        | application/pdf                        |
+| ZIP 压缩包    | .zip        | application/zip                        |
+| GZIP 文件     | .gz         | application/gzip                       |
+| MP3 音频      | .mp3        | audio/mpeg                             |
+| MP4 视频      | .mp4        | video/mp4                              |
+| WebM 视频     | .webm       | video/webm                             |
+| OGG 音频/视频 | .ogg        | application/ogg 或 audio/ogg/video/ogg |
+| WOFF 字体     | .woff       | font/woff                              |
+| WOFF2 字体    | .woff2      | font/woff2                             |
+| TTF 字体      | .ttf        | font/ttf                               |
+| OTF 字体      | .otf        | font/otf                               |
+| CSV 表格      | .csv        | text/csv                               |
+| 纯文本        | .txt        | text/plain                             |
+
+对于`Content-Type`字段的分析, 一般通过两个渠道解析出来, 一是通过文件的后缀名, 下面我们用的就是这个方法, 但相信你也知道, 后缀名这个东西, 可能是有错误的, Linux本身对于文件类型的判断都不借助于后缀名, 所以另一个渠道是通过某些第三方库, 来通过对文件内容的分析直接得出MIME 类型, 比如`libmagic `库, 我们这里力求简洁易懂, 所以用的是第一个渠道.
+
+如果采用第一种方法, 可能需要一张像上面表格那样描述类型对应关系的配置文件, 然后文件初始化对象会读这个文件, 并进行一定的处理, 然后别的组件直接向内存文件对象直接询问, 这个`readHtml`最好改成类, 从职责划分来看, `readHtml`适合干这件事: 确定请求资源的MIME 类型, 但我们这里还是简单一点, 直接写到`HttpRequest`里面
+
+```cpp
+void parse()
+{
+    // std::cout << _body<<std::endl;
+    std::string temp;
+    std::stringstream ss(_req_header[0]);
+    ss >> method_ >> url_query_ >> http_version_;
+    size_t pos = url_query_.find('?');
+    if (pos == std::string::npos)
+        temp = url_query_;
+    temp = url_query_.substr(0, pos);
+    url_query_.erase(0, pos);
+    if (temp == "/")
+    {
+        path_ = HOME_PAGE;
+    }
+    else
+    {
+        path_ += WEB_ROOT;
+        path_ += temp;
+    }
+    mime_ = "text/html";
+    pos = path_.rfind('.');
+    if(pos == std::string::npos) return;
+    temp = path_.substr(pos);
+    if(temp == ".jpg" || temp == ".jpeg") mime_ = "image/jpeg";
+    // std::cout << _body<<std::endl;
+}
+
+
+static void *threadRun(void *args_)
+{
+    pthread_detach(pthread_self());
+    char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    // std::cout << n << std::endl;
+    if (n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml(req.getPath());
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        if(body.empty())
+        {
+            body = readHtml(COSMIC_404);
+            response_line = "HTTP/1.0 404 Not Found\r\n";
+        }
+        // response_line = "HTTP/1.0 302 Found\r\n";               // 硬编码
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "Content-Type: ";
+        response_header += req.getMime();
+        response_header += "\r\n"; // 把"Location"这行末尾加换行
+        // response_header += "Location: https://www.qq.com";
+        // response_header += "\r\n"; // 把"Location"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        std::cout << response<<std::endl;    // 不看正文了
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+}
+```
+
+![image-20250408135156130](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135156238.png)
+
+![image-20250408135233157](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135233241.png)
+
+![image-20250408135332506](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135332633.png)
+
+另外说一下, 在`readHtml`那里, 可能会有人这样这样写
+
+```cpp
+std::string readHtml(const std::string& resource_path)
+{
+    std::ifstream in(resource_path.c_str(), std::ios::binary);
+    if(!in.is_open()) return std::string();
+    std::string result((std::istreambuf_iterator<char>(in)), (std::istreambuf_iterator<char>()));
+    in.close();
+    return result;
+}
+```
+
+首先要说的是它用的是`std::string`的迭代器构造, `std::istreambuf_iterator`是个模版类, 可以把C++输入流的底层缓冲区包装成迭代器的样子, 所以就可以不用计算文件大小了, 需要说明的是`std::istreambuf_iterator`是一次性的, `(std::istreambuf_iterator<char>(in))`的意思就是把`in`这个输入流底层缓冲区的起始位置包装成迭代器, `(std::istreambuf_iterator<char>())`就是把当前使用的缓冲区, 这里就是`in`的末尾位置包装成迭代器, 所以它是一次性的, 不能混着用, 你必须要先做完这个输入流, 再用它包装另一个输入流, 否则它会对不上的.
+
+好的, 在上面的过程中, 我们看到, 首页有多个资源, 所以尽管我们在浏览器上只访问了首页, 但客户端和服务端进行了多次会话, 每次会话只传一份资源, 这就是短连接.	
+
+下面我们谈另一个字段, 那就是`Cookie`, 这个`Cookie`是用来保持进行会话保持的, 这里要说到一个背景知识, 就是HTTP它默认是无状态的, 什么意思呢? 无状态的意思是, HTTP 协议在每次请求和响应之间不保留任何关于客户端状态的信息。每次请求都是独立的，服务器不会自动记住之前的请求或客户端的状态。这些状态有很多种, 比如登录状态,   我们拿B站举例, B站上有很多视频, 每个视频可能都对应一个页面, 很明显, 看视频你需要先登录, 于是服务端把你重定向到了登录页面, 你登录成功, 看到了视频, 接着你又想看你一个视频, 由于每次请求是独立的, 所以这次请求会丧失之前请求的登录信息, 所以这次请求会认为你没有登录, 又把你重定向到登录界面, 要求你进行登录, 但很明显, 实际上, 并不是这样,  你发现把B站页面关掉, 再重新打开, 它还认识你是谁, 不会让你重新登陆 .          这就是借助了`Cookie`这个字段实现的.
+
+ 具体怎么实现的呢? 其实也比较简单, 首先你进入B站首页, 点了登录按钮, 于是被重定向到了登录界面, 你把账号密码输进去, 服务端就会依据你的账号密码再数据库里面找到并验证你, 然后就给你发一个响应报文, 这个响应报文的报头里会有一个`Set-Cookie`选项, 该选项描述了客户端的状态, 比如它可能就是直接的账号密码`username=wind&&passwd=1234`, 也有可能不直接包含状态, 但通过某些标识符映射着某些状态, 然后浏览器收到这份报文后, 就会把`Set-Cookie`存起来, 等到你访问其它页面时, 浏览器就会把`Coolie`放在请求报头里面, 服务端一解析, 就会知道, 你是谁, 就不用再重新进行登录了. 
+
+浏览器对`Cookie`的保存分为两种, 一是内存级, 就是不往磁盘上写, 所以你把浏览器关闭, `Cookie`信息就丢失了, 二是磁盘机文件, 因为已经写到磁盘上了, 所以你即使关机重启, 上面的内容还保存着.
+
+这里我们打开`Edge`浏览器, 不用`Chrome`的原因是因为`Chrome`会把`Cookie`内容封装起来, 所以我们看不到实际内容, `Edge`是可以直接看到的.
+
+![image-20250408154729131](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154729804.png)
+
+![image-20250408154809982](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154810688.png)
+
+![image-20250408154840620](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154841220.png)
+
+![image-20250408154912740](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154913422.png)
+
+![image-20250408154934249](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154934879.png)
+
+接下来我们硬编码, 给响应报文都加个`Set-Cookie`
+
+```cpp
+static void *threadRun(void *args_)
+    {
+        pthread_detach(pthread_self());
+        char buffer[BUFFER_SIZE];
+        std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+        ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+        // std::cout << n << std::endl;
+        if (n > 0)
+        {
+            buffer[n] = 0;
+            HttpRequest req;
+            req.init(buffer); // 默认报文完整
+            req.parse();
+            req.print();
+            // std::cout <<buffer;
+
+            // 返回响应的过程     初学阶段, 硬编码
+            std::string body = readHtml(req.getPath());
+            std::string response_line = "HTTP/1.0 200 OK\r\n";
+            if(body.empty())
+            {
+                body = readHtml(COSMIC_404);
+                response_line = "HTTP/1.0 404 Not Found\r\n";
+            }
+            // response_line = "HTTP/1.0 302 Found\r\n";               // 硬编码
+            std::string response_header = "Content-Length: ";
+            response_header += std::to_string(body.size());
+            response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+            response_header += "Content-Type: ";
+            response_header += req.getMime();
+            response_header += "\r\n"; // 把"Content-Type"这行末尾加换行
+            response_header += "Set-Cookie: name=2131&&passwd=12345";
+            response_header += "\r\n"; // 把"Set-Cookie"这行末尾加换行
+            // response_header += "Location: https://www.qq.com";
+            // response_header += "\r\n"; // 把"Location"这行末尾加换行
+            response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+            std::string response = response_line;
+            response += response_header;
+            std::cout << response<<std::endl;    // 不看正文了
+            response += body;
+            send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+        }
+        return nullptr;
+    }
+```
+
+我们再次访问, 就能看到我们的Cookie了
+
+![image-20250408160144997](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408160145283.png)
+
+另外, 在后来访问的时候, 浏览器就自动把`Cookie`带上了
+
+![image-20250408161741599](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408161741811.png)
+
+我们上面的`Set-Cookie`字段写的稍有问题, 在响应报文中, 每个`Set-Cookie`都只是一个`k-v`结构, 所以如果要传送多个`k-v`, 需要用到多个`Set-Cookie`, 而不是多个`k-v`用`&&`连起来, 挤到一个`Set-Cookie`里, 下面我们改一下
+
+```cpp
+static void *threadRun(void *args_)
+{
+    pthread_detach(pthread_self());
+    char buffer[BUFFER_SIZE];
+    std::shared_ptr<threadArgs> args(reinterpret_cast<threadArgs *>(args_));
+    ssize_t n = recv(args->_sockfd, buffer, sizeof(buffer) - 1, 0);
+    // std::cout << n << std::endl;
+    if (n > 0)
+    {
+        buffer[n] = 0;
+        HttpRequest req;
+        req.init(buffer); // 默认报文完整
+        req.parse();
+        req.print();
+        // std::cout <<buffer;
+
+        // 返回响应的过程     初学阶段, 硬编码
+        std::string body = readHtml(req.getPath());
+        std::string response_line = "HTTP/1.0 200 OK\r\n";
+        if(body.empty())
+        {
+            body = readHtml(COSMIC_404);
+            response_line = "HTTP/1.0 404 Not Found\r\n";
+        }
+        // response_line = "HTTP/1.0 302 Found\r\n";               // 硬编码
+        std::string response_header = "Content-Length: ";
+        response_header += std::to_string(body.size());
+        response_header += "\r\n"; // 把"Content-Length"这行末尾加换行
+        response_header += "Content-Type: ";
+        response_header += req.getMime();
+        response_header += "\r\n"; // 把"Content-Type"这行末尾加换行
+        response_header += "Set-Cookie: name=2131";
+        response_header += "\r\n"; // 把"Set-Cookie"这行末尾加换行
+        response_header += "Set-Cookie: passwd=12345";
+        response_header += "\r\n"; // 把"Set-Cookie"这行末尾加换行
+        // response_header += "Location: https://www.qq.com";
+        // response_header += "\r\n"; // 把"Location"这行末尾加换行
+        response_header += "\r\n"; // 加一个空行, 作为报头和正文的分隔符
+        std::string response = response_line;
+        response += response_header;
+        std::cout << response<<std::endl;    // 不看正文了
+        response += body;
+        send(args->_sockfd, response.c_str(), response.size(), 0); // 差错处理不做了, send和write的关系l类似于read和recv
+    }
+    return nullptr;
+```
+
+![image-20250409153807296](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409153807415.png)
+
+在上面我们写的`Cookie`里面就是用户的账号密码, 相当于通过账号密码直接对用户进行身份验证, 但实际上, 现在已经没有人会这样做了, 因为很明显, 这种`Cookie`很容易造成信息安全问题. 
+
+在细说原因之前, 我们需要知道的一个前置信息就是, 在今天, 对于专业人士来说, 普通用户的安全防护等级几乎为零, 因此, 对于用户来说, 几乎非常容易因为各种各样的原因, 而沾染上恶意程序, 于是那些专业人士就可以很方便地获取到`Cookie`文件中的账号密码, 从而获得对账号的控制权, 不仅仅是使用权, 控制权是可以直接修改密码, 从而让用户失去对账号的控制, 并且, 某些客户端具有很强的社交属性, 它们里面其实也有`Cookie`, 对于这种软件来说, 即使只有使用权, 也可以利用社交账号的身份属性对用户进行冒充, 进而造成很严重的后果. 
+
+ 所以`Cookie`里面不能直接存放账号密码, 而是间接存储你的身份属性.
+
+当用户第一次登录服务端时, 客户端会把用户的账号密码交给服务端, 服务端对其进行身份验证, 当验证通过时, 便会为用户创建一个`Session`(会话)文件, `Session`文件中存放着用户的敏感信息数据, 比如账号密码, 随后, 服务端会通过一些方式, 将`Session`文件映射到一个特定长度的字符串中, 该字符串就被称为`Session ID`, 而服务端向客户端返回的`Set-Cookie`, 里面将不会有账号密码这类敏感数据, 而是只有`Session ID`这种间接映射账号密码的全服务端唯一标识符, 等到用户下次再次登录该服务端, 客户端或者浏览器就会把`Session ID`发给服务端, 服务端就能借助于这个`Session ID`找到`Session`文件, 从而知道你是谁, 这样, 尽管因为HTTP的无状态性质, 每次会话都是独立的, 但这些独立的会话就能通过`Session`文件联系起来, 从而达到会话保持的效果.
+
+当然, 服务端会有很多`Session`文件, 所以它会建立专门的子模块去维护这些`Session`文件,  常见的就如`Redis `集群 , 这种方案就相当于把敏感信息交由更安全的服务端进行管理, 尽管黑客仍可以通过盗取`Session ID`去冒充用户, 但只能有使用权, 没有控制权, 而且服务端还可以通过分析诸如用户的`IP`, 用户的行为, 从而判断这个用户是不是冒充的, 服务端觉得你是冒充的, 就会让你重新输入密码进行验证, 但`Cookie`没有密码, 所以就增加了冒充成本, 甚至把账号冻结.一个常见的例子是, 比如放假, 你回到老家, 你登录时, 服务端就会说, "登录一个不常用的IP, 请重新登录", 至于用户行为,   就是看用户的行为是不是非常反常, 就像换了一个人一样, 原来可能QQ很少说话, 但突然, 天天聊天, 类似于这种.
+
+现在还有一个问题, HTTP是明文传送的, 即使你`Cookie`里面没有账号密码, 但登录的时候肯定是要输账号密码的, 那在客户端向服务端传账号密码的时候, 因为是明文, 这信息不就泄露了吗? 为此, 下面我们就进入新的章节, HTTPS.
+
+## HTTPS
+
+
 
 # 完
