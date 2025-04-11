@@ -8159,4 +8159,457 @@ HTTPS 工作过程中涉及到的密钥有三组
 
 最后我们需要知道的是, 世上没有最安全的协议, HTTPS仍有弱点, 比如以往黑客都是攻击客户端的, 现在可以直接自己做客户端, 去攻击服务端......
 
+## 传输层
+
+应用层我们已经搞得差不多了, 下面我们重新回到传输层, 准备谈谈UDP和TCP它们的底层逻辑, 由于传输层的职责只有传输, 而不考虑其他, 比如应用层的数据安全需求, 报文完整性需求, 会话表示需求.... 非常多的需求, 所以应用层谈的比较散, 但传输层就不会这样, 逻辑会比较顺, 另外, 传输层, 网络层, 实际是系统的一部分, 所以我们又回到内核了, 下面我们就开始Linux内核网络部分的学习.
+
+我们知道, 端口号标识了一个主机上进行通信的不同的应用程序.
+
+![image-20250411150906863](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411150906992.png)
+
+在TCP/IP协议中, 用 "源IP", "源端口号", "目的IP", "目的端口号", "协议号" 这样一个五元组来标识一个通信(可以通过netstat -n查看);  
+
+![image-20250411151013751](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151013947.png)
+
+上图描述了一个网络服务的场景, 图中服务端以多执行流的状态建立与多个用户的会话, 客户端B只有一个页面, 所以只有一个会话, 客户端A有两个页面, 所以有两个会话, 并且这两个页面的端口号并不相同, 这样服务端才能对这两个页面进行区分.
+
+多个画面, 实际上就是用户机器有多个页面访问服务端
+
+![image-20250411151444249](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151444388.png)
+
+端口号是16位的, 也就是`0-65535`, 其中`0-1023`被称为"知名端口号", HTTP(80), FTP(21), SSH(22)等这些广为使用的应用层协议, 他们的端口号都是固定的.  另外的, 也就是`1024-65535  `, 是操作系统动态分配的端口号. 客户端程序的端口号, 就是由操作系统从这个范围分配的.  不过也有些服务不在知名端口号, 比如MySQL(3306)
+
+系统里也有对应的配置文件, 记录了知名服务对应的固定端口号, 我们可以执行`vim /etc/services`查看它们
+
+![image-20250411152930361](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411152931028.png)
+
+对于这些知名服务的端口, 除非正式服务, 否则不要用. 
+
+另外我们还需要知道的是一个进程也可以绑定多个端口号, 比如刚刚的Chrome, 当然, 服务端也可以多执行流绑定多个端口, 每个端口对应某个具体的活动.
+
+下面我们正式认识一下netstat, 一个用来查看网络状态的重要工具.  以下是常见选项
+
+- n 拒绝显示别名，能显示数字的全部转化成数字  
+- l 仅列出有在 Listen (监听) 的服务状态 
+-  p 显示建立相关链接的程序名  
+- t (tcp)仅显示tcp相关选项  
+- u (udp)仅显示udp相关选项  
+- a (all)显示所有选项，默认不显示LISTEN相关 
+
+```shell
+[whisper@starry-sky projects]$ netstat
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0    336 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+Active UNIX domain sockets (w/o servers)
+Proto RefCnt Flags       Type       State         I-Node   Path
+unix  3      [ ]         STREAM     CONNECTED     9527     
+unix  3      [ ]         SEQPACKET  CONNECTED     9415     
+unix  3      [ ]         STREAM     CONNECTED     4721189  
+unix  2      [ ]         STREAM     CONNECTED     4693260  
+unix  3      [ ]         STREAM     CONNECTED     4721192  
+unix  3      [ ]         STREAM     CONNECTED     4721190  
+unix  3      [ ]         STREAM     CONNECTED     4721193  
+unix  3      [ ]         STREAM     CONNECTED     9197     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4721194  
+unix  3      [ ]         STREAM     CONNECTED     4695267  
+unix  2      [ ]         DGRAM                    4694328  /run/user/1003/systemd/notify
+unix  3      [ ]         STREAM     CONNECTED     4721196  
+unix  2      [ ]         DGRAM      CONNECTED     9403     
+unix  3      [ ]         STREAM     CONNECTED     28499    /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     9306     
+unix  3      [ ]         STREAM     CONNECTED     4695892  
+unix  3      [ ]         STREAM     CONNECTED     4695266  
+unix  3      [ ]         STREAM     CONNECTED     9361     
+unix  2      [ ]         DGRAM                    14156    
+unix  3      [ ]         STREAM     CONNECTED     4721191  
+unix  2      [ ]         DGRAM      CONNECTED     3739     
+unix  3      [ ]         SEQPACKET  CONNECTED     9414     
+unix  3      [ ]         STREAM     CONNECTED     4721195  
+unix  2      [ ]         DGRAM                    9348     
+unix  3      [ ]         STREAM     CONNECTED     10505    /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     4693853  
+unix  3      [ ]         DGRAM      CONNECTED     4694329  
+unix  3      [ ]         STREAM     CONNECTED     9582     
+unix  3      [ ]         DGRAM      CONNECTED     7060     
+unix  3      [ ]         STREAM     CONNECTED     4693926  /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     5697     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4694834  
+unix  3      [ ]         DGRAM      CONNECTED     7058     
+unix  3      [ ]         DGRAM      CONNECTED     3939     
+unix  3      [ ]         STREAM     CONNECTED     8648     
+unix  3      [ ]         STREAM     CONNECTED     9787     
+unix  3      [ ]         STREAM     CONNECTED     9792     
+unix  3      [ ]         STREAM     CONNECTED     29412    
+unix  3      [ ]         STREAM     CONNECTED     4694833  
+unix  3      [ ]         STREAM     CONNECTED     5693     
+unix  2      [ ]         DGRAM      CONNECTED     4694298  
+unix  3      [ ]         DGRAM      CONNECTED     7059     
+unix  2      [ ]         DGRAM      CONNECTED     9413     /run/chrony/chronyd.sock
+unix  3      [ ]         DGRAM      CONNECTED     3479     
+unix  2      [ ]         DGRAM      CONNECTED     6136     
+unix  3      [ ]         STREAM     CONNECTED     9583     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4694290  
+unix  3      [ ]         STREAM     CONNECTED     4694804  
+unix  3      [ ]         STREAM     CONNECTED     10557    /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     4694307  
+unix  3      [ ]         STREAM     CONNECTED     9789     
+unix  3      [ ]         STREAM     CONNECTED     9305     
+unix  3      [ ]         STREAM     CONNECTED     9785     
+unix  3      [ ]         DGRAM      CONNECTED     4694330  
+unix  3      [ ]         STREAM     CONNECTED     9786     
+unix  3      [ ]         STREAM     CONNECTED     9500     
+unix  3      [ ]         STREAM     CONNECTED     4694820  
+unix  3      [ ]         STREAM     CONNECTED     28494    /run/systemd/journal/stdout
+unix  3      [ ]         DGRAM      CONNECTED     3480     
+unix  3      [ ]         STREAM     CONNECTED     10556    
+unix  3      [ ]         STREAM     CONNECTED     9790     
+unix  3      [ ]         DGRAM      CONNECTED     3938     
+unix  3      [ ]         STREAM     CONNECTED     4693891  /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     9788     
+unix  3      [ ]         DGRAM      CONNECTED     7057     
+unix  3      [ ]         STREAM     CONNECTED     4694819  
+unix  3      [ ]         STREAM     CONNECTED     9503     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     29398    
+unix  2      [ ]         DGRAM      CONNECTED     4517     
+unix  3      [ ]         STREAM     CONNECTED     10581    
+unix  3      [ ]         STREAM     CONNECTED     4695890  
+unix  3      [ ]         STREAM     CONNECTED     4695887  
+unix  3      [ ]         STREAM     CONNECTED     8647     
+unix  3      [ ]         STREAM     CONNECTED     8652     /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     8551     
+unix  3      [ ]         STREAM     CONNECTED     4142     
+unix  3      [ ]         STREAM     CONNECTED     4432     
+unix  3      [ ]         STREAM     CONNECTED     4352     /run/systemd/journal/stdout
+unix  3      [ ]         DGRAM      CONNECTED     3478     /run/systemd/notify
+unix  3      [ ]         STREAM     CONNECTED     4695886  
+unix  2      [ ]         DGRAM      CONNECTED     8270     
+unix  3      [ ]         STREAM     CONNECTED     10570    
+unix  3      [ ]         STREAM     CONNECTED     4695889  
+unix  2      [ ]         DGRAM      CONNECTED     8646     
+unix  3      [ ]         STREAM     CONNECTED     10889    
+unix  3      [ ]         STREAM     CONNECTED     8255     
+unix  2      [ ]         DGRAM      CONNECTED     8521     
+unix  2      [ ]         DGRAM                    3502     /run/systemd/journal/syslog
+unix  10     [ ]         DGRAM      CONNECTED     3506     /run/systemd/journal/dev-log
+unix  3      [ ]         STREAM     CONNECTED     8543     /run/systemd/journal/stdout
+unix  8      [ ]         DGRAM      CONNECTED     3508     /run/systemd/journal/socket
+unix  3      [ ]         STREAM     CONNECTED     8507     
+unix  3      [ ]         STREAM     CONNECTED     9920     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8650     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     8256     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4695885  
+unix  3      [ ]         STREAM     CONNECTED     8509     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4695888  
+unix  2      [ ]         DGRAM      CONNECTED     3815     
+unix  3      [ ]         STREAM     CONNECTED     10571    
+unix  3      [ ]         STREAM     CONNECTED     4433     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8416     
+unix  3      [ ]         STREAM     CONNECTED     8651     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4695891  
+unix  3      [ ]         STREAM     CONNECTED     8420     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8541     
+unix  3      [ ]         STREAM     CONNECTED     4694800  
+unix  3      [ ]         STREAM     CONNECTED     10255    
+unix  3      [ ]         STREAM     CONNECTED     4694797  
+unix  2      [ ]         DGRAM      CONNECTED     10523    
+unix  3      [ ]         STREAM     CONNECTED     10348    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8695     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10535    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10345    
+unix  2      [ ]         DGRAM      CONNECTED     10620    
+unix  3      [ ]         STREAM     CONNECTED     4694799  
+unix  2      [ ]         DGRAM      CONNECTED     10475    
+unix  3      [ ]         STREAM     CONNECTED     9791     
+unix  3      [ ]         STREAM     CONNECTED     4694801  
+unix  3      [ ]         STREAM     CONNECTED     10533    
+unix  3      [ ]         STREAM     CONNECTED     4694798  
+unix  3      [ ]         STREAM     CONNECTED     9170     
+unix  3      [ ]         STREAM     CONNECTED     8836     
+unix  3      [ ]         STREAM     CONNECTED     8840     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10582    
+unix  3      [ ]         STREAM     CONNECTED     4694803  
+unix  3      [ ]         STREAM     CONNECTED     8847     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4694802  
+unix  3      [ ]         STREAM     CONNECTED     9171     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8694     
+unix  3      [ ]         STREAM     CONNECTED     10256    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8838     @a58564fd9bbcd1b0/bus/systemd/bus-api-system
+unix  3      [ ]         STREAM     CONNECTED     8369     @8c16d6645d7d582f/bus/systemd-network/bus-api-network
+unix  2      [ ]         DGRAM                    13744    @/usr/local/qcloud/YunJing/conf/ydrpc_3@
+unix  3      [ ]         STREAM     CONNECTED     8370     @4d311898a53b2ecd/bus/systemd-resolve/bus-api-resolve
+unix  3      [ ]         STREAM     CONNECTED     4694332  @28462715f50dfd29/bus/systemd/bus-system
+unix  3      [ ]         STREAM     CONNECTED     8574     @f2c6bb1c11ef4e79/bus/systemd-logind/system
+[whisper@starry-sky projects]$ #其中tcp udp开头的是网络套接字, unix开头的是域间套接字, 用于本地进程间通信
+[whisper@starry-sky projects]$ #如果只想查看处于监听状态的服务加上"-l"选项
+[whisper@starry-sky projects]$ netstat -l
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+udp        0      0 _localdnsproxy:domain   0.0.0.0:*                          
+udp        0      0 _localdnsstub:domain    0.0.0.0:*                          
+udp        0      0 my-ubuntu:bootpc        0.0.0.0:*                          
+udp        0      0 localhost:323           0.0.0.0:*                          
+udp6       0      0 ip6-localhost:323       [::]:*                             
+raw6       0      0 [::]:ipv6-icmp          [::]:*                  7          
+Active UNIX domain sockets (only servers)
+Proto RefCnt Flags       Type       State         I-Node   Path
+unix  2      [ ACC ]     STREAM     LISTENING     8361     /run/acpid.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694331  /run/user/1003/systemd/private
+unix  2      [ ACC ]     STREAM     LISTENING     8367     /run/dbus/system_bus_socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694339  /run/user/1003/bus
+unix  2      [ ACC ]     STREAM     LISTENING     13746    /usr/local/qcloud/YunJing/conf/ydrpc_1
+unix  2      [ ACC ]     STREAM     LISTENING     8371     /run/lxd-installer.socket
+unix  2      [ ACC ]     STREAM     LISTENING     8373     /run/snapd.socket
+unix  2      [ ACC ]     STREAM     LISTENING     8375     /run/snapd-snap.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694340  /run/user/1003/gnupg/S.dirmngr
+unix  2      [ ACC ]     STREAM     LISTENING     4694342  /run/user/1003/gnupg/S.gpg-agent.browser
+unix  2      [ ACC ]     STREAM     LISTENING     8384     /run/uuidd/request
+unix  2      [ ACC ]     STREAM     LISTENING     4694344  /run/user/1003/gnupg/S.gpg-agent.extra
+unix  2      [ ACC ]     STREAM     LISTENING     4694349  /run/user/1003/gnupg/S.gpg-agent
+unix  2      [ ACC ]     STREAM     LISTENING     4694351  /run/user/1003/gnupg/S.keyboxd
+unix  2      [ ACC ]     STREAM     LISTENING     4694353  /run/user/1003/pk-debconf-socket
+unix  2      [ ACC ]     STREAM     LISTENING     9818     /home/whisper/.local/share/code-server/code-server-ipc.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4694355  /run/user/1003/snapd-session-agent.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694378  /run/user/1003/gnupg/S.gpg-agent.ssh
+unix  2      [ ACC ]     STREAM     LISTENING     4694839  /run/user/1003/vscode-ipc-d16af049-0f39-46e6-8d27-358005af28d0.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4695912  /run/user/1003/vscode-ipc-f5a1baaf-541f-4ef6-b59d-d8e7e677d594.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4696125  /run/user/1003/vscode-git-188cd3ed6b.sock
+unix  2      [ ACC ]     STREAM     LISTENING     3481     /run/systemd/private
+unix  2      [ ACC ]     STREAM     LISTENING     3483     /run/systemd/userdb/io.systemd.DynamicUser
+unix  2      [ ACC ]     STREAM     LISTENING     3484     /run/systemd/io.systemd.ManagedOOM
+unix  2      [ ACC ]     STREAM     LISTENING     3499     /run/lvm/lvmpolld.socket
+unix  2      [ ACC ]     STREAM     LISTENING     3504     /run/systemd/fsck.progress
+unix  2      [ ACC ]     STREAM     LISTENING     3510     /run/systemd/journal/stdout
+unix  2      [ ACC ]     SEQPACKET  LISTENING     3514     /run/udev/control
+unix  2      [ ACC ]     STREAM     LISTENING     6190     /run/systemd/resolve/io.systemd.Resolve
+unix  2      [ ACC ]     STREAM     LISTENING     6191     /run/systemd/resolve/io.systemd.Resolve.Monitor
+unix  2      [ ACC ]     STREAM     LISTENING     3736     /run/systemd/journal/io.systemd.journal
+unix  2      [ ACC ]     STREAM     LISTENING     4249     /run/systemd/io.systemd.sysext
+unix  2      [ ACC ]     STREAM     LISTENING     3501     @/org/kernel/linux/storage/multipathd
+unix  2      [ ACC ]     STREAM     LISTENING     8368     @ISCSIADM_ABSTRACT_NAMESPACE
+[whisper@starry-sky projects]$ # 只想查看与TCP有关的监听服务
+[whisper@starry-sky projects]$ netstat -tl
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+[whisper@starry-sky projects]$ netstat -t
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0     16 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0    224 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 不带上"-l"选项将不展示监听服务, 而只显示其他状态的
+[whisper@starry-sky projects]$ # "-a"选项显示所有状态
+[whisper@starry-sky projects]$ netstat -ta
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0     15 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+tcp6       0    212 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 另外我们发现有些服务后面没有显示端口号, 可以带上"-n"显示
+[whisper@starry-sky projects]$ netstat -tan
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.54:53           0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.1:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.1:41398         127.0.0.1:38095         ESTABLISHED
+tcp        0      0 127.0.0.1:41406         127.0.0.1:38095         ESTABLISHED
+tcp        0      0 127.0.0.1:38095         127.0.0.1:41406         ESTABLISHED
+tcp        0     15 127.0.0.1:38095         127.0.0.1:41398         ESTABLISHED
+tcp        0      0 10.0.12.6:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 10.0.12.6:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 10.0.12.6:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0      0 :::22                   :::*                    LISTEN     
+tcp6       0    112 10.0.12.6:22            112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 选项"p"显示对应进程信息
+[whisper@starry-sky projects]$ netstat -tp
+(Not all processes could be identified, non-owned process info
+ will not be shown, you would have to be root to see it all.)
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 my-ubuntu:49124         169.254.0.4:http        TIME_WAIT   -                   
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED -                   
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED -                   
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED 850042/node         
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED 849977/node         
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED -                   
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED -                   
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED -                   
+tcp6       0    280 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED -                   
+[whisper@starry-sky projects]$ # 有些看不到, 因为权限不够
+[whisper@starry-sky projects]$ sudo netstat -tp
+[sudo] password for whisper: 
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0     19 localhost:41398         localhost:38095         ESTABLISHED 849926/sshd: whispe 
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED 849926/sshd: whispe 
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED 850042/node         
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED 849977/node         
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED 2393/YDService      
+tcp        0      0 my-ubuntu:60862         169.254.0.55:http-alt   TIME_WAIT   -                   
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED 1036/tat_agent      
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED 2393/YDService      
+tcp6       0     96 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED 849629/sshd: whispe 
+[whisper@starry-sky projects]$ 
+```
+
+另外还有一些其它状态查询的指令, 比如`iostat`
+
+```shell
+[whisper@starry-sky projects]$ iostat
+Linux 6.8.0-51-generic (my-ubuntu)      04/11/2025      _x86_64_        (2 CPU)
+
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+           0.41    0.01    0.77    0.14    0.00   98.66
+
+Device             tps    kB_read/s    kB_wrtn/s    kB_dscd/s    kB_read    kB_wrtn    kB_dscd
+loop0             0.00         0.00         0.00         0.00         14          0          0
+sr0               0.00         0.05         0.00         0.00       8434          0          0
+vda               5.53         6.72        58.71         0.00    1135185    9917409          0
+
+
+[whisper@starry-sky projects]$ 
+```
+
+对于某些守护进程来说, 用`ps`查起来很麻烦, 此时就可以使用`pidof`直接查
+
+```shell
+[whisper@starry-sky Network]$ sudo ps ajx | head -1 && ps ajx | grep sshd | grep -v grep
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+      1    1372    1372    1372 ?             -1 Ss       0   0:00 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+   1372  849629  849629  849629 ?             -1 Ss       0   0:00 sshd: whisper [priv]
+ 849629  849926  849629  849629 ?             -1 S     1003   0:01 sshd: whisper@notty
+[whisper@starry-sky Network]$ sudo ps ajx | head -1 && ps ajx | grep sshd | grep -v grep | awk '{print $2}'
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+1372
+849629
+849926
+[whisper@starry-sky Network]$ # 有时候, 要把一堆服务都停止
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+884286
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+884286
+884835
+884856
+884866
+884875
+[whisper@starry-sky Network]$ #由于它们是守护进程, 所以要用kill -9 停止 
+[whisper@starry-sky Network]$ # xargs指令可以把标准输入转化为命令行形式
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' | xargs kill -9
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+[whisper@starry-sky Network]$ # 此时就可以使用pidof
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+887170
+887195
+887204
+887219
+[whisper@starry-sky Network]$ pidof tcpserver
+887219 887204 887195 887170
+[whisper@starry-sky Network]$ pidof tcpserver | xargs kill -9
+
+```
+
+### UDP
+
+在讲解传输层和网络层的的相关协议时, 我们要围绕的话题是**报头和负载该如何分离**, **怎样决定有效载荷应该交付给更上层协议中的哪一个**
+
+我们先看看UDP的报文是什么样的
+
+![image-20250411163844645](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411163844778.png)
+
+UDP怎么分离报头和负载的呢? 其实很简单, 它采用的是定长模式, UDP报文前八字节就是它的报头, 剩下的就是负载, 怎么交给更上层呢? 在报头中, 我们可以看到有一个"目的端口号", 通过这个"目的端口号"就能找到与之绑定的`socket`文件, 就能把收到的负载写进去, 进程再通过`socket`获取负载.
+
+两个端口号我们就不说了, "16位UDP长度"表示了整个报文的长度,减八字节就是负载长度, "16位UDP校验和"可以对正文进行校验, 如果校验出错, 这份报文就会被直接丢弃.
+
+UDP传输的过程类似于寄信 
+
+- 无连接: 知道对端的IP和端口号就直接进行传输, 不需要建立连接;  
+- 不可靠: 没有确认机制, 没有重传机制; 如果因为网络故障该段无法发到对方, UDP协议层也不会给应用层返回任何错误信息;
+- 面向数据报: 不能够灵活的控制读写数据的次数和数量;  
+
+"面向数据包"的特点是你发几次, 对方就收几次, UDP报文之间为独立关系,   另外, UDP没有真正意义上的 发送缓冲区. 调用sendto会直接交给内核, 由内核将数据传给网络层协议进行后续的传输动作;  UDP具有接收缓冲区. 但是这个接收缓冲区不能保证收到的UDP报的顺序和发送UDP报的顺序一致, 可能一个报文明明是后发的, 但路由选择比较好, 反而先被收到, 我们把这种情况叫做报文发生了乱序, 对于这种情况, 乱序只能通过我们自己在应用层解决; 如果缓冲区满了, 可能是收到的报文数量太多, 再到达的UDP数据就会被丢弃; 
+
+另外要注意的一点是, UDP的长度字段只有16位, 所以一个UDP报文最多时64KB, 所以如果要发超过64KB大小的数据, 你要想办法把它们拆分成小于64KB的小份, 这些小份可能要依据应用层的种种操作标记一下顺序, 然后再一份份发过去.
+
+UDP十分简单, 所以它适用于对速度很有要求的场景, 比如, 网络直播, 打游戏什么的,  由于UDP不可靠, 所以可能出现丢包情况, 体现就是视频突然模糊了一下.
+
+和应用层搞序列化和反序列化不同, 应用层是因为它有时经常要改动, 所以序列化和反序列化就能适配更多的场景, 但内核并不搞序列化和反序列化, 它真的直接用结构体, 具体的来说, 它实际上是把报头中的成员以位段的形式存在结构体中
+
+```c
+struct UdpHeader
+{
+    unsigned int src_port : 16;
+    unsigned int dst_port : 16;
+    unsigned int length : 16;
+    unsigned int check_code : 16;
+};
+```
+
+UDP虽然没有缓冲区, 但还是要被系统进行管理的, 对UDP报文进行管理的结构被称为`sk_buff`, 它也承担着把报文和负载结合起来的功能
+
+````c
+struct sk_buff
+{
+    char* start;
+    char* end;
+    char* pos;
+    int typr;
+    ....
+    struct sk_buff* next;
+};
+````
+
+然后我们可以从内存找一片空间作为UDP报文存放的场所
+
+![image-20250411181213150](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411181213329.png)
+
+丢弃报文的对应动作就是把`struct sk_buff*`给释放.
+
 # 完
