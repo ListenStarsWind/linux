@@ -8009,6 +8009,734 @@ static void *threadRun(void *args_)
 
 ## HTTPS
 
+### 初识HTTPS
 
+首先我们需要说的是, 在应用层, HTTP和HTTPS是共存的.  在以往, HTTP把报文构造好之后, 就直接把报文通过系统接口交给操作系统, 操作系统再把报文发到网络中, 由于系统并没有进行数据加密的职责, 所以它就会明文发送到网络中, 所以我们的报文就相当于在网络中裸奔, 这种数据安全问题催生出人们对于数据加密的需求, 于是, 就有组织在应用层中又加了一个新的软件层, 叫做加密解密层, 典型的就如`ssl`协议, 此时HTTP在构造完报文后就可以选择将报文先交给加密解密层, 然后再由加密解密层经过对报文的加密解密之后再交给操作系统, 这样报文就不是明文了, 光一个HTTP那就是HTTP, 如果HTTP再加上`ssl`, 那就成了HTTPS, 不过我们从计算机哲学角度来看, 即使HTTPS它有加密, 但也不是高枕无忧的, 它也有安全问题, 但比HTTP少了很多, 没有协议是完全安全的, 判断协议是否安全靠的不是协议本身, 而是协议背后的人, 绝对安全是无法从技术角度上探讨的, 而是从社会工程学上探讨, 如果一个协议攻破的成本大于攻破的收益, 那它才是比较安全的, 其中涉及到`ssl`这种加密解密层的社区维护人员和进行网络攻击相关人士的较量.
+
+在继续更近一步前, 我们先要了解一下与加密解密相关的概念, "加密", "解密"这两个词其实可以望文生义, 加密就是把明文变成密文的过程, 解密就是把密文变回明文的过程, 在加密解密过程中, 往往需要一系列辅助工具, 对于计算机科学来说, 那其实就是某种数据, 毕竟计算机就是数据处理工具, 这种在加密解密过程中起辅助作用的数据, 我们就称之为"秘钥".
+
+比如, 我们可以使用按位异或模拟一次简单的加密解密过程, 
+
+![image-20250409175056435](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409175056520.png)
+
+当然我们实际用的肯定不是这么简单的, 实际上, 对于加密解密这件事,  计算机还没出来的时候人们就有需求了, 如今, 只不过是需求延伸到计算机里面, 对于加密解密, 早就有了对应的学派, 密码学, 这个学派里面都是数学神仙, 我们下面不会谈数学原理, 而只是从工程学角度略微说说.
+
+首先从需求角度来看, (这个好像是经济学角度)
+
+在互联网早期, 大家都用HTTP的那个年代, 有时候会出现一种被称为"运营商劫持"的怪事, 那就是你本来想要下载什么软件, 但最后你拿到的链接是用来下载另一个软件的, 然后稀里糊涂把它下下来, 发现不是自己想要的.
+
+出现这种情况的原因是, 你和下载服务器之间的通信用的是明文, 是明文的话, 里面的内容就很容易被被人获知甚至篡改, 由于运营商管的是物理层的事, 所以很明显, 不管什么报文, 你最后都要到物理层, 所以如果报文是明文的, 运营商就能看得一清二楚, 当服务端响应客户端的请求, 为客户端发出一份含有软件下载链接的报文时, 运营商就会看到, 然后他可能就会因为有一些公司给他利益之类的原因, 就把报文拦下来, 把里面的链接换成某些公司的软件, 从而给某些公司的平台增大曝光度流量之类的,     我们把这种基于网络传输中间过程的攻击称为"中间人攻击", 缩写为`MITM`, 在这里, 运营商就扮演着"中间人"的这个角色, 运营商其实还好, 要是黑客做中间人, 那就非常不好了. 中间人不是说一定干坏事, 但最好不要让他们看到.
+
+总而言之, 网络通信不能用明文.所以我们要加密.
+
+### 常见的加密方式
+
+ 我们首先说"对称加密". 对称加密就是说, 加密和解密用同一份密钥, 我们之前的那个按位异或, 其实就是一种对称加密.它的特点就是加密速度快, 效率也高. 另外的一种就是"非对称加密", 在"非对称加密"里, 会涉及到两个密钥, 我们记为`A`和`	B`, 用`A`加密出的密文只能由`B`解密出明文, 而对于用`	B`加密出的密文也只能由`A`来进行解密, 一般来说, 会把其中的一个密钥公开出去, 称之为"公钥", 另外的, 不公开的, 就被称之为"私钥". 它的特点就是加密解密速度很慢, 效率也不行.因为涉及到很多算法. 在分了"公钥"和"私钥"之后, "私钥"加的密只有"公钥"能解, "公钥"加的密只能由"私钥"来解.
+
+### 数据摘要和数据指纹
+
+数据摘要或者说数据指纹, 其基本原理是利用哈希函数, 对信息进行运算, 从而生成一串固定长度的字符串, 数据摘要的本身不是加密, 它的主要应用是用来判断数据有没有遭到篡改.   数据摘要有极小可能会发生冲突, 但概率确实很小, 所以可以认为在全局具有唯一性.  比如, 有一个文件`a`, 它用某种摘要算法(专门生成数据摘要的哈希算法), 比如`MD5`, 生成了一份数据摘要, 此时, 即使对`a`改了一个字节, 那用同样的摘要算法所得出的数据摘要也会和之前的那份有很大的差别, 所以就可以快速判断出文件是否被篡改.
+
+数据摘要有很多应用, 比如, 刚刚我们在HTTP里面说的 `Session ID`, 由于同一个站点内不会有相同的账号密码, 所以由此生成的`Session`文件也是不同的, 此时就可以使用摘要算法把`Session`文件转成一个固定的字符串, 作为用户身份的标识.                    另一个应用是, 网盘里面的"秒传", 对于网盘公司来说, 经常会遇到这种情况, 就是很多用户传了一样的文件, 比如最近一个站点提供免费的电影资源, 然后就有很多人从这个站点里下了一部电影, 由于资源都是一样的, 所以多个用户下载下来的电影其实都是一样的, 对于网盘公司来说, 它当然不想让自己硬盘里存着多份完全相同的文件, 所以当其中一个用户把电影传上去了, 它就会用这份电影生成一份数据摘要, 等到之后, 又有用户要上传同份文件, 网盘就先会在本地用摘要算法生成一份摘要, 结果往数据库里一比对, 发现, 有相同的, 那我就不传了, 此时网盘就会对之前的那份原始文件做类似于引用计数的操作, 比如弄个软链接指向那份原始数据.
+
+数据摘要有时也需要再被加密, 此时得到的密文就被称为数字签名.
+
+### HTTPS的工作流程
+
+HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们将从最简单的方案开始, 逐一进行分析, 改进解决方案, 最终获得我们目前主流使用的主流方案.
+
+**方案一: 只使用对称加密**
+
+![image-20250409195346720](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409195346812.png)
+
+在这种情况下, 客户端和服务端通过某种方式共同维护着同一份密钥, 无论是请求还是响应, 都会先被密钥加密, 所以中间人无法获知其中的内容.
+
+但这种方案有一个致命缺点, 就是客户端很容易被黑客直接攻击, 从而导致密钥泄露, 而且, 这种方案会导致客户端和服务端的解耦性太高, 比如服务端如果要升级加密方式, 它很难让所有用户一夜之间全换密钥, 有些用户, 他就不喜欢更新, 因为各种原因, 比如我的`vscode`已经不能更新了, 再更新就连不上我的`Centos9`了. 我们的密钥必须由服务器生成, 然后安全的传过去给客户端用. 
+
+但很明显, 最起码在对称加密的情况下, 客户端与服务端正常通信前, 还要获得来自服务端的密钥, 由于你之前没有密钥, 所以密钥本身会以明文形式进行传输, 这就是掩耳盗铃.
+
+**方案二: 只使用非对称加密**
+
+既然仅靠对称加密握不了手, 那么我们就用非对称加密试试
+
+![image-20250409202416156](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409202416232.png)
+
+服务端预先生成一对公钥私钥, 等待客户端连接, 最开始, 用的当然是HTTP协议, 但HTTP不安全, 所以客户端请求使用HTTPS, 服务端收到之后, 就会把公钥以正文形式交付给客户端, 在这之后, 就进入了HTTPS, 客户端的请求先借助于公钥变为密文, 然后传输到服务端, 服务端通过私钥还原为明文, 并把请求报文使用私钥加密, 交付给客户端, 客户端使用公钥解密, 转为明文.    
+
+不过这个方案仍有不足之处, 尽管用户端发出的被公钥加密的密文黑客解不了密, 但服务端用私钥生成的密文, 黑客可以解密, 获知其中的内容, 但这还不是最严重的情况. 我们先不说最严重的情况
+
+**方案三: 使用两对公钥私钥**
+
+在这种方案下, 在正式通信前, 服务端和客户端都各自生成一对公钥私钥, 握手时交换彼此的公钥私钥
+
+![image-20250409210122724](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409210122798.png)
+
+在握手成功之后, 客户端再发请求, 先要用服务端的公钥进行加密, 此时密文只能由服务端的私钥解密, 服务端发响应, 先用客户端的公钥进行加密, 此时密文只能由客户端的私钥解密, 这样就构成了安全信道
+
+但这种方案首先, 由于使用了俩对非对称加密, 所以效率低, 速度也慢
+
+另外, 这种方案和之前的方案一样, 都存在着致命性安全问题 
+
+**方案四: 握手使用非对称, 正常通信使用对称**
+
+![image-20250409213012966](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409213013040.png)
+
+服务端生成公钥和私钥, 将公钥发给客户端, 客户端本地创建一个对称密钥, 并使用公钥加密, 发给服务端, 服务端使用密钥解密, 获取对称密钥.
+
+在握手阶段, 因为发的是公钥, 所以即使被黑客获取也没有关系, 因为靠这个公钥解密不出来对称密钥, 这样在正常会话的时候, 就可以直接使用对称密钥了.
+
+现在我们已经解决了效率问题, 现在我们要看之前方案都存在的致命问题
+
+![image-20250409214150885](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409214150960.png)
+
+在客户端明文发出请求协议升级时, 黑客就意识到了对应的服务端马上会分发公钥, 他自己生成一对公钥私钥, 等到服务端把包含公钥的报文发过来时, 对报文进行分析, 把其中的公钥换成黑客自己的公钥, 客户端使用黑客的公钥对本地生成的对称密钥进行加密, 黑客使用自己的私钥解密, 获取对称密钥, 黑客使用之前拦截下来的公钥对解密后的报文进行再加密, 发给服务端, 服务端拿到密文, 使用私钥解密, 获得对称密钥.
+
+此处的关键在于, 客户端没有办法去查证拿到的公钥是不是服务端的公钥, 如果它能意识到拿到的实际是黑客的公钥, 就会进行规避动作.为此, 我们要想一个办法, 确保公钥不会被黑客替换, 确保公钥的合法性.
+
+### 证书
+
+服务端在使用HTTPS之前, 需要向CA机构申请一份数字证书, 数字证书中含有证书申请者信息, 公钥信息等, 服务器把证书传输给浏览器, 浏览器就可以从证书中获得公钥, 证书就如同身份证, 证明服务端公钥的权威性.
+
+CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织颁发 无法被伪造, 修改能被察觉的"证书", 这些"证书"里面就含有服务端的公钥, 所以只要客户端获得了证书, 就可以验证并获得服务端的公钥, 从而与服务端建立加密信道.
+
+这个小节的知识点比较零碎, 所以我们找不到明确的线索把它们连起来, 只有把零碎知识全都说的差不多了, 才能把它们连起来. 放轻松, 先把这些零碎知识当做独立事件来看, 不要彼此弄混了.
+
+我们先简略说说这个CA证书是怎么申请的. 首先负责运营服务端的个人或者集体需要先自己生成一对非对称加密的公钥和私钥, 然后收集一些能够证明自己身份的信息, 具有法律效力的身份信息, 比如, 网站的域名, 申请者或者组织是谁...... 再加上自己刚刚生成的公钥, 用这些信息生成一份`.csr`文件, 提交给CA机构, CA机构会对其中的信息进行审核, 审核通过后, 就会给服务端的管理者颁发一份数字证书. 然后之后服务端以客户端进行通信时, 服务端就不直接发公钥, 而是发这份数字证书, 这份证书里就含有用于进行cs通信的公钥, 客户端可以通过一些手段来验证证书的合法性, 验证通过, 就意味着里面的内容没有被替换, 就意味着里面的公钥没有被替换, 就是服务端的公钥, 从而避免了之前我们描述HTTPS工作流程所说的致命安全问题. 
+
+这里有一张图, 我们先大致看看, 后面会说细节的:
+
+![image-20250410211816814](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410211817032.png)
+
+然后我们看看这个证书里面大致有什么内容, 签名我们先略过, 签发机构就是这个证书是谁颁发的, 比如我们身份证上面也有签发机构, 有效时间表明了证书的有效时间(好像是废话), 就像身份证不是永久的, 证书也不是永久的, 只有一段的时间期限, 过期了, 浏览器就会说, 证书过期了, 不安全, 扩展信息和技术没有太大关系, 我们略过, 域名就是网站的域名是什么, 申请者描述了谁申请了这份证书, 公钥就是服务端在申请证书前生成的那份公钥, 就是`.csr`里面的那份公钥, 就是提交给CA机构的那份公钥, 就是服务端与客户端进行cs通信时, 从HTTP转为HTTPS的那份公钥, 等会儿还有个公钥, 注意不要弄混了.   注意, 服务端生成的那份私钥一直都被自己保管着, 并没有交给任何人, 并没有外泄, CA机构也不知道服务端的私钥.
+
+下面我们要探讨两点, 一是该如何保证这份证书是CA机构颁发的, 而不是其它人伪造的, 二是该如何保证这张证书只要被改了, 客户端立刻就能发现, 从而避免数据泄露.这两个话题是靠签名实现的, 具体原理我们先不说.
+
+我们换个话题, 先说`.csr`怎么生成, 你可以本地通过某些算法直接生成一份, 也可以在网上找一个在线生成网页生成. 这个仅仅是生成`.csr`, 还没有把`.csr`提交给CA机构
+
+这里就有一个[在线生成csr文件的网站](https://myssl.com/csr_create.html)
+
+![image-20250410214144262](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410214144339.png)
+
+把信息填好之后, 点击"生成", 网站就会自己生成一份私钥, 公钥, 然后把这份刚刚生成的公钥加到`csr`文件中, 并向你返回私钥和`csr`文件. 所以这个在线网站是可以知道私钥信息的, 因此要选择具有安全认证的在线网站.
+
+之后, 服务端就可以把私钥放到本地, 再也不拿出来, 然后把`.csr`提交给CA机构, 不过我们一般不直接给CA机构, 因为它的认证过程很繁琐, 所以一般委托给提供相应服务的服务商, 让他们交给CA机构.
+
+之后, 我们先了解一下什么是签名, 也就是证书里面的签名大概是什么生成的., 注意, 这下面也有一对公钥私钥, 这个公钥私钥可不是服务端的公钥私钥, 而是CA机构的公钥私钥, 千万不要混了.
+
+![image-20250410215440960](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410215441052.png)
+
+首先我们有一份原始数据, 对于CA证书来说, 这份原始数据就是把CA证书的签名字段去除后剩下的原文内容, 然后使用哈希算法, 为这份原始数据生成一份数据摘要, 我们前面说过数据摘要, 我们说, 它可以用来验证原始文件是否遭到了修改., 之后CA机构用自己的密钥把这份数据摘要进行了加密处理, 所生成的这份密文就是签名, 随后把这份签名附加到原始文件上, 这样就得到了一份证书.  
+
+等到客户端拿到这个证书之后, 先把签名和明文分离, 为明文再次生成一份数据摘要, 然后再使用内置在系统里的, 由CA机构发布的公钥去解密签名, 这样就得到了以前的数据摘要, 把现在的数据摘要和以前的数据摘要一比较, 就知道, 这份证书有没有被修改. 
+
+如果黑客对明文进行篡改, 历史数据摘要和现在的数据摘要就会不相同, 客户端就知道这份证书不安全, 从而进行规避, 至于签名, 黑客改不动, 因为黑客没有CA机构的私钥, 如果他用别的私钥, 客户端手里的CA机构公钥就解不出来签名, 客户端就可以知道签名被篡改了, 执行规避动作. 当然, 用户无视风险继续访问是用户的事, 不是我们技术原因
+
+如果黑客自己或者威胁他人, 办了一张真正的CA证书, 那么首先, 这份CA证书上面的身份信息就是线下找到黑客的线索, 其次, 证书上面有域名, 如果客户端访问的是`baidu.com`, 结果收到的证书是`xxx.com`, 那也能判断出证书不是自己要的, 所以连验证都不会验证.
+
+这世界上只有CA机构能颁发证书, 因为证书里的签名必须用到CA机构的私钥, 而如果有人篡改, 通过签名解密之后的数据摘要也能判断出来.
+
+在确认证书安全之后, 客户端就会从其中的明文拿到服务端的公钥, 由于证书安全, 所以这个公钥也一定是服务端的.  在这之后, 客户端本地生成对称密钥, 并使用公钥对其进行加密, 发回给服务端, 服务端收到密文之后, 使用私钥解密, 这样就能拿到对称密钥, 接着就转为HTTPS.
+
+对于一些关键网站, 浏览器可能会自备证书, 此时第一次连接时客户端可以直接发加密的对称密钥, 服务端直接解密就行, 不用再让服务端再发证书. 
+
+![image-20250411143707730](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411143707943.png)
+
+最后我们总结一下
+
+HTTPS 工作过程中涉及到的密钥有三组
+
+第一组(非对称加密): 用于校验证书是否被篡改. 服务器持有私钥(私钥在形成 CSR 文件与申请证书时获得), 客户端持有公钥(操作系统包含了可信任的 CA 认证机构有哪些, 同时持有对应的公钥). 服务器在客户端请求时， 返回携带签名的证书. 客户端通过这个公钥进行证书验证, 保证证书的合法性， 进一步保证证书中携带的服务端公钥权威性。
+
+第⼆组(非对称加密): 用于协商生成对称加密的密钥. 客户端用收到的 CA 证书中的公钥(是可被信任的)给随机生成的对称加密的密钥加密, 传输给服务器, 服务器通过私钥解密获取到对称加密密钥.  
+
+第三组(对称加密): 客户端和服务器后续传输的数据都通过这个对称密钥加密解密  
+
+其实一切的关键都是围绕这个对称加密的密钥. 其他的机制都是辅助这个密钥工作的.  
+
+>第⼆组非对称加密的密钥是为了让客户端把这个对称密钥传给服务器.  
+>
+>第一组非对称加密的密钥是为了让客户端拿到第⼆组非对称加密的公钥  
+
+最后我们需要知道的是, 世上没有最安全的协议, HTTPS仍有弱点, 比如以往黑客都是攻击客户端的, 现在可以直接自己做客户端, 去攻击服务端......
+
+## 传输层
+
+应用层我们已经搞得差不多了, 下面我们重新回到传输层, 准备谈谈UDP和TCP它们的底层逻辑, 由于传输层的职责只有传输, 而不考虑其他, 比如应用层的数据安全需求, 报文完整性需求, 会话表示需求.... 非常多的需求, 所以应用层谈的比较散, 但传输层就不会这样, 逻辑会比较顺, 另外, 传输层, 网络层, 实际是系统的一部分, 所以我们又回到内核了, 下面我们就开始Linux内核网络部分的学习.
+
+我们知道, 端口号标识了一个主机上进行通信的不同的应用程序.
+
+![image-20250411150906863](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411150906992.png)
+
+在TCP/IP协议中, 用 "源IP", "源端口号", "目的IP", "目的端口号", "协议号" 这样一个五元组来标识一个通信(可以通过netstat -n查看);  
+
+![image-20250411151013751](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151013947.png)
+
+上图描述了一个网络服务的场景, 图中服务端以多执行流的状态建立与多个用户的会话, 客户端B只有一个页面, 所以只有一个会话, 客户端A有两个页面, 所以有两个会话, 并且这两个页面的端口号并不相同, 这样服务端才能对这两个页面进行区分.
+
+多个画面, 实际上就是用户机器有多个页面访问服务端
+
+![image-20250411151444249](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151444388.png)
+
+端口号是16位的, 也就是`0-65535`, 其中`0-1023`被称为"知名端口号", HTTP(80), FTP(21), SSH(22)等这些广为使用的应用层协议, 他们的端口号都是固定的.  另外的, 也就是`1024-65535  `, 是操作系统动态分配的端口号. 客户端程序的端口号, 就是由操作系统从这个范围分配的.  不过也有些服务不在知名端口号, 比如MySQL(3306)
+
+系统里也有对应的配置文件, 记录了知名服务对应的固定端口号, 我们可以执行`vim /etc/services`查看它们
+
+![image-20250411152930361](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411152931028.png)
+
+对于这些知名服务的端口, 除非正式服务, 否则不要用. 
+
+另外我们还需要知道的是一个进程也可以绑定多个端口号, 比如刚刚的Chrome, 当然, 服务端也可以多执行流绑定多个端口, 每个端口对应某个具体的活动.
+
+下面我们正式认识一下netstat, 一个用来查看网络状态的重要工具.  以下是常见选项
+
+- n 拒绝显示别名，能显示数字的全部转化成数字  
+- l 仅列出有在 Listen (监听) 的服务状态 
+-  p 显示建立相关链接的程序名  
+- t (tcp)仅显示tcp相关选项  
+- u (udp)仅显示udp相关选项  
+- a (all)显示所有选项，默认不显示LISTEN相关 
+
+```shell
+[whisper@starry-sky projects]$ netstat
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0    336 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+Active UNIX domain sockets (w/o servers)
+Proto RefCnt Flags       Type       State         I-Node   Path
+unix  3      [ ]         STREAM     CONNECTED     9527     
+unix  3      [ ]         SEQPACKET  CONNECTED     9415     
+unix  3      [ ]         STREAM     CONNECTED     4721189  
+unix  2      [ ]         STREAM     CONNECTED     4693260  
+unix  3      [ ]         STREAM     CONNECTED     4721192  
+unix  3      [ ]         STREAM     CONNECTED     4721190  
+unix  3      [ ]         STREAM     CONNECTED     4721193  
+unix  3      [ ]         STREAM     CONNECTED     9197     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4721194  
+unix  3      [ ]         STREAM     CONNECTED     4695267  
+unix  2      [ ]         DGRAM                    4694328  /run/user/1003/systemd/notify
+unix  3      [ ]         STREAM     CONNECTED     4721196  
+unix  2      [ ]         DGRAM      CONNECTED     9403     
+unix  3      [ ]         STREAM     CONNECTED     28499    /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     9306     
+unix  3      [ ]         STREAM     CONNECTED     4695892  
+unix  3      [ ]         STREAM     CONNECTED     4695266  
+unix  3      [ ]         STREAM     CONNECTED     9361     
+unix  2      [ ]         DGRAM                    14156    
+unix  3      [ ]         STREAM     CONNECTED     4721191  
+unix  2      [ ]         DGRAM      CONNECTED     3739     
+unix  3      [ ]         SEQPACKET  CONNECTED     9414     
+unix  3      [ ]         STREAM     CONNECTED     4721195  
+unix  2      [ ]         DGRAM                    9348     
+unix  3      [ ]         STREAM     CONNECTED     10505    /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     4693853  
+unix  3      [ ]         DGRAM      CONNECTED     4694329  
+unix  3      [ ]         STREAM     CONNECTED     9582     
+unix  3      [ ]         DGRAM      CONNECTED     7060     
+unix  3      [ ]         STREAM     CONNECTED     4693926  /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     5697     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4694834  
+unix  3      [ ]         DGRAM      CONNECTED     7058     
+unix  3      [ ]         DGRAM      CONNECTED     3939     
+unix  3      [ ]         STREAM     CONNECTED     8648     
+unix  3      [ ]         STREAM     CONNECTED     9787     
+unix  3      [ ]         STREAM     CONNECTED     9792     
+unix  3      [ ]         STREAM     CONNECTED     29412    
+unix  3      [ ]         STREAM     CONNECTED     4694833  
+unix  3      [ ]         STREAM     CONNECTED     5693     
+unix  2      [ ]         DGRAM      CONNECTED     4694298  
+unix  3      [ ]         DGRAM      CONNECTED     7059     
+unix  2      [ ]         DGRAM      CONNECTED     9413     /run/chrony/chronyd.sock
+unix  3      [ ]         DGRAM      CONNECTED     3479     
+unix  2      [ ]         DGRAM      CONNECTED     6136     
+unix  3      [ ]         STREAM     CONNECTED     9583     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4694290  
+unix  3      [ ]         STREAM     CONNECTED     4694804  
+unix  3      [ ]         STREAM     CONNECTED     10557    /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     4694307  
+unix  3      [ ]         STREAM     CONNECTED     9789     
+unix  3      [ ]         STREAM     CONNECTED     9305     
+unix  3      [ ]         STREAM     CONNECTED     9785     
+unix  3      [ ]         DGRAM      CONNECTED     4694330  
+unix  3      [ ]         STREAM     CONNECTED     9786     
+unix  3      [ ]         STREAM     CONNECTED     9500     
+unix  3      [ ]         STREAM     CONNECTED     4694820  
+unix  3      [ ]         STREAM     CONNECTED     28494    /run/systemd/journal/stdout
+unix  3      [ ]         DGRAM      CONNECTED     3480     
+unix  3      [ ]         STREAM     CONNECTED     10556    
+unix  3      [ ]         STREAM     CONNECTED     9790     
+unix  3      [ ]         DGRAM      CONNECTED     3938     
+unix  3      [ ]         STREAM     CONNECTED     4693891  /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     9788     
+unix  3      [ ]         DGRAM      CONNECTED     7057     
+unix  3      [ ]         STREAM     CONNECTED     4694819  
+unix  3      [ ]         STREAM     CONNECTED     9503     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     29398    
+unix  2      [ ]         DGRAM      CONNECTED     4517     
+unix  3      [ ]         STREAM     CONNECTED     10581    
+unix  3      [ ]         STREAM     CONNECTED     4695890  
+unix  3      [ ]         STREAM     CONNECTED     4695887  
+unix  3      [ ]         STREAM     CONNECTED     8647     
+unix  3      [ ]         STREAM     CONNECTED     8652     /run/dbus/system_bus_socket
+unix  2      [ ]         DGRAM      CONNECTED     8551     
+unix  3      [ ]         STREAM     CONNECTED     4142     
+unix  3      [ ]         STREAM     CONNECTED     4432     
+unix  3      [ ]         STREAM     CONNECTED     4352     /run/systemd/journal/stdout
+unix  3      [ ]         DGRAM      CONNECTED     3478     /run/systemd/notify
+unix  3      [ ]         STREAM     CONNECTED     4695886  
+unix  2      [ ]         DGRAM      CONNECTED     8270     
+unix  3      [ ]         STREAM     CONNECTED     10570    
+unix  3      [ ]         STREAM     CONNECTED     4695889  
+unix  2      [ ]         DGRAM      CONNECTED     8646     
+unix  3      [ ]         STREAM     CONNECTED     10889    
+unix  3      [ ]         STREAM     CONNECTED     8255     
+unix  2      [ ]         DGRAM      CONNECTED     8521     
+unix  2      [ ]         DGRAM                    3502     /run/systemd/journal/syslog
+unix  10     [ ]         DGRAM      CONNECTED     3506     /run/systemd/journal/dev-log
+unix  3      [ ]         STREAM     CONNECTED     8543     /run/systemd/journal/stdout
+unix  8      [ ]         DGRAM      CONNECTED     3508     /run/systemd/journal/socket
+unix  3      [ ]         STREAM     CONNECTED     8507     
+unix  3      [ ]         STREAM     CONNECTED     9920     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8650     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     8256     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4695885  
+unix  3      [ ]         STREAM     CONNECTED     8509     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     4695888  
+unix  2      [ ]         DGRAM      CONNECTED     3815     
+unix  3      [ ]         STREAM     CONNECTED     10571    
+unix  3      [ ]         STREAM     CONNECTED     4433     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8416     
+unix  3      [ ]         STREAM     CONNECTED     8651     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4695891  
+unix  3      [ ]         STREAM     CONNECTED     8420     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8541     
+unix  3      [ ]         STREAM     CONNECTED     4694800  
+unix  3      [ ]         STREAM     CONNECTED     10255    
+unix  3      [ ]         STREAM     CONNECTED     4694797  
+unix  2      [ ]         DGRAM      CONNECTED     10523    
+unix  3      [ ]         STREAM     CONNECTED     10348    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8695     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10535    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10345    
+unix  2      [ ]         DGRAM      CONNECTED     10620    
+unix  3      [ ]         STREAM     CONNECTED     4694799  
+unix  2      [ ]         DGRAM      CONNECTED     10475    
+unix  3      [ ]         STREAM     CONNECTED     9791     
+unix  3      [ ]         STREAM     CONNECTED     4694801  
+unix  3      [ ]         STREAM     CONNECTED     10533    
+unix  3      [ ]         STREAM     CONNECTED     4694798  
+unix  3      [ ]         STREAM     CONNECTED     9170     
+unix  3      [ ]         STREAM     CONNECTED     8836     
+unix  3      [ ]         STREAM     CONNECTED     8840     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     10582    
+unix  3      [ ]         STREAM     CONNECTED     4694803  
+unix  3      [ ]         STREAM     CONNECTED     8847     /run/dbus/system_bus_socket
+unix  3      [ ]         STREAM     CONNECTED     4694802  
+unix  3      [ ]         STREAM     CONNECTED     9171     /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8694     
+unix  3      [ ]         STREAM     CONNECTED     10256    /run/systemd/journal/stdout
+unix  3      [ ]         STREAM     CONNECTED     8838     @a58564fd9bbcd1b0/bus/systemd/bus-api-system
+unix  3      [ ]         STREAM     CONNECTED     8369     @8c16d6645d7d582f/bus/systemd-network/bus-api-network
+unix  2      [ ]         DGRAM                    13744    @/usr/local/qcloud/YunJing/conf/ydrpc_3@
+unix  3      [ ]         STREAM     CONNECTED     8370     @4d311898a53b2ecd/bus/systemd-resolve/bus-api-resolve
+unix  3      [ ]         STREAM     CONNECTED     4694332  @28462715f50dfd29/bus/systemd/bus-system
+unix  3      [ ]         STREAM     CONNECTED     8574     @f2c6bb1c11ef4e79/bus/systemd-logind/system
+[whisper@starry-sky projects]$ #其中tcp udp开头的是网络套接字, unix开头的是域间套接字, 用于本地进程间通信
+[whisper@starry-sky projects]$ #如果只想查看处于监听状态的服务加上"-l"选项
+[whisper@starry-sky projects]$ netstat -l
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+udp        0      0 _localdnsproxy:domain   0.0.0.0:*                          
+udp        0      0 _localdnsstub:domain    0.0.0.0:*                          
+udp        0      0 my-ubuntu:bootpc        0.0.0.0:*                          
+udp        0      0 localhost:323           0.0.0.0:*                          
+udp6       0      0 ip6-localhost:323       [::]:*                             
+raw6       0      0 [::]:ipv6-icmp          [::]:*                  7          
+Active UNIX domain sockets (only servers)
+Proto RefCnt Flags       Type       State         I-Node   Path
+unix  2      [ ACC ]     STREAM     LISTENING     8361     /run/acpid.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694331  /run/user/1003/systemd/private
+unix  2      [ ACC ]     STREAM     LISTENING     8367     /run/dbus/system_bus_socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694339  /run/user/1003/bus
+unix  2      [ ACC ]     STREAM     LISTENING     13746    /usr/local/qcloud/YunJing/conf/ydrpc_1
+unix  2      [ ACC ]     STREAM     LISTENING     8371     /run/lxd-installer.socket
+unix  2      [ ACC ]     STREAM     LISTENING     8373     /run/snapd.socket
+unix  2      [ ACC ]     STREAM     LISTENING     8375     /run/snapd-snap.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694340  /run/user/1003/gnupg/S.dirmngr
+unix  2      [ ACC ]     STREAM     LISTENING     4694342  /run/user/1003/gnupg/S.gpg-agent.browser
+unix  2      [ ACC ]     STREAM     LISTENING     8384     /run/uuidd/request
+unix  2      [ ACC ]     STREAM     LISTENING     4694344  /run/user/1003/gnupg/S.gpg-agent.extra
+unix  2      [ ACC ]     STREAM     LISTENING     4694349  /run/user/1003/gnupg/S.gpg-agent
+unix  2      [ ACC ]     STREAM     LISTENING     4694351  /run/user/1003/gnupg/S.keyboxd
+unix  2      [ ACC ]     STREAM     LISTENING     4694353  /run/user/1003/pk-debconf-socket
+unix  2      [ ACC ]     STREAM     LISTENING     9818     /home/whisper/.local/share/code-server/code-server-ipc.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4694355  /run/user/1003/snapd-session-agent.socket
+unix  2      [ ACC ]     STREAM     LISTENING     4694378  /run/user/1003/gnupg/S.gpg-agent.ssh
+unix  2      [ ACC ]     STREAM     LISTENING     4694839  /run/user/1003/vscode-ipc-d16af049-0f39-46e6-8d27-358005af28d0.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4695912  /run/user/1003/vscode-ipc-f5a1baaf-541f-4ef6-b59d-d8e7e677d594.sock
+unix  2      [ ACC ]     STREAM     LISTENING     4696125  /run/user/1003/vscode-git-188cd3ed6b.sock
+unix  2      [ ACC ]     STREAM     LISTENING     3481     /run/systemd/private
+unix  2      [ ACC ]     STREAM     LISTENING     3483     /run/systemd/userdb/io.systemd.DynamicUser
+unix  2      [ ACC ]     STREAM     LISTENING     3484     /run/systemd/io.systemd.ManagedOOM
+unix  2      [ ACC ]     STREAM     LISTENING     3499     /run/lvm/lvmpolld.socket
+unix  2      [ ACC ]     STREAM     LISTENING     3504     /run/systemd/fsck.progress
+unix  2      [ ACC ]     STREAM     LISTENING     3510     /run/systemd/journal/stdout
+unix  2      [ ACC ]     SEQPACKET  LISTENING     3514     /run/udev/control
+unix  2      [ ACC ]     STREAM     LISTENING     6190     /run/systemd/resolve/io.systemd.Resolve
+unix  2      [ ACC ]     STREAM     LISTENING     6191     /run/systemd/resolve/io.systemd.Resolve.Monitor
+unix  2      [ ACC ]     STREAM     LISTENING     3736     /run/systemd/journal/io.systemd.journal
+unix  2      [ ACC ]     STREAM     LISTENING     4249     /run/systemd/io.systemd.sysext
+unix  2      [ ACC ]     STREAM     LISTENING     3501     @/org/kernel/linux/storage/multipathd
+unix  2      [ ACC ]     STREAM     LISTENING     8368     @ISCSIADM_ABSTRACT_NAMESPACE
+[whisper@starry-sky projects]$ # 只想查看与TCP有关的监听服务
+[whisper@starry-sky projects]$ netstat -tl
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+[whisper@starry-sky projects]$ netstat -t
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0     16 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0    224 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 不带上"-l"选项将不展示监听服务, 而只显示其他状态的
+[whisper@starry-sky projects]$ # "-a"选项显示所有状态
+[whisper@starry-sky projects]$ netstat -ta
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:http-alt        0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsproxy:domain   0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 _localdnsstub:domain    0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED
+tcp        0     15 localhost:38095         localhost:41398         ESTABLISHED
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN     
+tcp6       0    212 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 另外我们发现有些服务后面没有显示端口号, 可以带上"-n"显示
+[whisper@starry-sky projects]$ netstat -tan
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State      
+tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.54:53           0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.1:38095         0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN     
+tcp        0      0 127.0.0.1:41398         127.0.0.1:38095         ESTABLISHED
+tcp        0      0 127.0.0.1:41406         127.0.0.1:38095         ESTABLISHED
+tcp        0      0 127.0.0.1:38095         127.0.0.1:41406         ESTABLISHED
+tcp        0     15 127.0.0.1:38095         127.0.0.1:41398         ESTABLISHED
+tcp        0      0 10.0.12.6:48716         169.254.0.55:5574       ESTABLISHED
+tcp        0      0 10.0.12.6:38830         169.254.0.138:8186      ESTABLISHED
+tcp        0      0 10.0.12.6:48714         169.254.0.55:5574       ESTABLISHED
+tcp6       0      0 :::22                   :::*                    LISTEN     
+tcp6       0    112 10.0.12.6:22            112.26.31.132:2827      ESTABLISHED
+[whisper@starry-sky projects]$ # 选项"p"显示对应进程信息
+[whisper@starry-sky projects]$ netstat -tp
+(Not all processes could be identified, non-owned process info
+ will not be shown, you would have to be root to see it all.)
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 my-ubuntu:49124         169.254.0.4:http        TIME_WAIT   -                   
+tcp        0      0 localhost:41398         localhost:38095         ESTABLISHED -                   
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED -                   
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED 850042/node         
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED 849977/node         
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED -                   
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED -                   
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED -                   
+tcp6       0    280 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED -                   
+[whisper@starry-sky projects]$ # 有些看不到, 因为权限不够
+[whisper@starry-sky projects]$ sudo netstat -tp
+[sudo] password for whisper: 
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0     19 localhost:41398         localhost:38095         ESTABLISHED 849926/sshd: whispe 
+tcp        0      0 localhost:41406         localhost:38095         ESTABLISHED 849926/sshd: whispe 
+tcp        0      0 localhost:38095         localhost:41406         ESTABLISHED 850042/node         
+tcp        0      0 localhost:38095         localhost:41398         ESTABLISHED 849977/node         
+tcp        0      0 my-ubuntu:48716         169.254.0.55:5574       ESTABLISHED 2393/YDService      
+tcp        0      0 my-ubuntu:60862         169.254.0.55:http-alt   TIME_WAIT   -                   
+tcp        0      0 my-ubuntu:38830         169.254.0.138:8186      ESTABLISHED 1036/tat_agent      
+tcp        0      0 my-ubuntu:48714         169.254.0.55:5574       ESTABLISHED 2393/YDService      
+tcp6       0     96 my-ubuntu:ssh           112.26.31.132:2827      ESTABLISHED 849629/sshd: whispe 
+[whisper@starry-sky projects]$ 
+```
+
+另外还有一些其它状态查询的指令, 比如`iostat`
+
+```shell
+[whisper@starry-sky projects]$ iostat
+Linux 6.8.0-51-generic (my-ubuntu)      04/11/2025      _x86_64_        (2 CPU)
+
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+           0.41    0.01    0.77    0.14    0.00   98.66
+
+Device             tps    kB_read/s    kB_wrtn/s    kB_dscd/s    kB_read    kB_wrtn    kB_dscd
+loop0             0.00         0.00         0.00         0.00         14          0          0
+sr0               0.00         0.05         0.00         0.00       8434          0          0
+vda               5.53         6.72        58.71         0.00    1135185    9917409          0
+
+
+[whisper@starry-sky projects]$ 
+```
+
+对于某些守护进程来说, 用`ps`查起来很麻烦, 此时就可以使用`pidof`直接查
+
+```shell
+[whisper@starry-sky Network]$ sudo ps ajx | head -1 && ps ajx | grep sshd | grep -v grep
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+      1    1372    1372    1372 ?             -1 Ss       0   0:00 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+   1372  849629  849629  849629 ?             -1 Ss       0   0:00 sshd: whisper [priv]
+ 849629  849926  849629  849629 ?             -1 S     1003   0:01 sshd: whisper@notty
+[whisper@starry-sky Network]$ sudo ps ajx | head -1 && ps ajx | grep sshd | grep -v grep | awk '{print $2}'
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+1372
+849629
+849926
+[whisper@starry-sky Network]$ # 有时候, 要把一堆服务都停止
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+884286
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+884286
+884835
+884856
+884866
+884875
+[whisper@starry-sky Network]$ #由于它们是守护进程, 所以要用kill -9 停止 
+[whisper@starry-sky Network]$ # xargs指令可以把标准输入转化为命令行形式
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' | xargs kill -9
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+[whisper@starry-sky Network]$ # 此时就可以使用pidof
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ./TCP/tcpserver -8888
+[whisper@starry-sky Network]$ ps ajx | head -1 && ps ajx | grep tcpserver | grep -v grep |awk '{print $2}' 
+   PPID     PID    PGID     SID TTY        TPGID STAT   UID   TIME COMMAND
+887170
+887195
+887204
+887219
+[whisper@starry-sky Network]$ pidof tcpserver
+887219 887204 887195 887170
+[whisper@starry-sky Network]$ pidof tcpserver | xargs kill -9
+
+```
+
+### UDP
+
+在讲解传输层和网络层的的相关协议时, 我们要围绕的话题是**报头和负载该如何分离**, **怎样决定有效载荷应该交付给更上层协议中的哪一个**
+
+我们先看看UDP的报文是什么样的
+
+![image-20250411163844645](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411163844778.png)
+
+UDP怎么分离报头和负载的呢? 其实很简单, 它采用的是定长模式, UDP报文前八字节就是它的报头, 剩下的就是负载, 怎么交给更上层呢? 在报头中, 我们可以看到有一个"目的端口号", 通过这个"目的端口号"就能找到与之绑定的`socket`文件, 就能把收到的负载写进去, 进程再通过`socket`获取负载.
+
+两个端口号我们就不说了, "16位UDP长度"表示了整个报文的长度,减八字节就是负载长度, "16位UDP校验和"可以对正文进行校验, 如果校验出错, 这份报文就会被直接丢弃.
+
+UDP传输的过程类似于寄信 
+
+- 无连接: 知道对端的IP和端口号就直接进行传输, 不需要建立连接;  
+- 不可靠: 没有确认机制, 没有重传机制; 如果因为网络故障该段无法发到对方, UDP协议层也不会给应用层返回任何错误信息;
+- 面向数据报: 不能够灵活的控制读写数据的次数和数量;  
+
+"面向数据包"的特点是你发几次, 对方就收几次, UDP报文之间为独立关系,   另外, UDP没有真正意义上的 发送缓冲区. 调用sendto会直接交给内核, 由内核将数据传给网络层协议进行后续的传输动作;  UDP具有接收缓冲区. 但是这个接收缓冲区不能保证收到的UDP报的顺序和发送UDP报的顺序一致, 可能一个报文明明是后发的, 但路由选择比较好, 反而先被收到, 我们把这种情况叫做报文发生了乱序, 对于这种情况, 乱序只能通过我们自己在应用层解决; 如果缓冲区满了, 可能是收到的报文数量太多, 再到达的UDP数据就会被丢弃; 
+
+另外要注意的一点是, UDP的长度字段只有16位, 所以一个UDP报文最多时64KB, 所以如果要发超过64KB大小的数据, 你要想办法把它们拆分成小于64KB的小份, 这些小份可能要依据应用层的种种操作标记一下顺序, 然后再一份份发过去.
+
+UDP十分简单, 所以它适用于对速度很有要求的场景, 比如, 网络直播, 打游戏什么的,  由于UDP不可靠, 所以可能出现丢包情况, 体现就是视频突然模糊了一下.
+
+和应用层搞序列化和反序列化不同, 应用层是因为它有时经常要改动, 所以序列化和反序列化就能适配更多的场景, 但内核并不搞序列化和反序列化, 它真的直接用结构体, 具体的来说, 它实际上是把报头中的成员以位段的形式存在结构体中
+
+```c
+struct UdpHeader
+{
+    unsigned int src_port : 16;
+    unsigned int dst_port : 16;
+    unsigned int length : 16;
+    unsigned int check_code : 16;
+};
+```
+
+UDP虽然没有缓冲区, 但还是要被系统进行管理的, 对UDP报文进行管理的结构被称为`sk_buff`, 它也承担着把报文和负载结合起来的功能
+
+````c
+struct sk_buff
+{
+    char* start;
+    char* end;
+    char* pos;
+    int typr;
+    ....
+    struct sk_buff* next;
+};
+````
+
+然后我们可以从内存找一片空间作为UDP报文存放的场所
+
+![image-20250411181213150](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411181213329.png)
+
+丢弃报文的对应动作就是把`struct sk_buff*`给释放.
+
+### TCP
+
+UDP我们随便说说就行了, 关键是TCP.我们会认真说道说道的.
+
+TCP全称为 "传输控制协议(Transmission Control Protocol"). 人如其名, 要对数据的传输进行一个详细的控制;  我们先简要理解一下, TCP在控制什么东西
+
+我们可以画一根线, 线上代表的应用层, 我们可以在上面写些服务, 比如之前我们自定义协议写的网络计算器, 线下面我们就只看传输层, 虽然我们说TCP有可靠性, 所以用`write, send`, 可以认为字节流就进网络了, 但实际上, 并不是这样, `read, recv, write, send`它们的实际作用只是把用户缓冲区的内容拷到TCP的发送缓冲区, 或者把TCP接收缓冲区的内容拷贝到应用层的接收缓冲区, 比如我们之前定的`buffer`, `string`什么东西的, 应用层的报文, (一般叫做请求或者响应), 只是来到了TCP的发送缓冲区, 至于它什么时候发送, 发送多少, 怎么发送, 出错了怎么办? 这些都不用我们用户操心, 而是由TCP自己控制, 而且, 服务端和客户端用的都是TCP, 大家都是对等的, 对于另一台机器来说, 也是这样
+
+![image-20250412220403590](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250412220403714.png)
+
+另外, 我们其实也能感受到, 类似的话我们在文件里似乎也说过.   我们说每个文件都有自己的缓冲区, 我们使用`read, write`, 只是把数据从用户层缓冲区移到了内核层缓冲区, 至于内核层缓冲区中的数据, 什么时候写到文件里, 怎么写到文件里, 和磁盘怎么协商 都由系统自己决定, 用户不用关心, 今天我们学习网络, 就相当于把磁盘换成网卡, 这里再说一下, TCP的缓冲区实际上用的就是socket文件的缓冲区.
+
+所以我们对于网络就可以这样理解, 应用层只进行数据处理, 比如什么加密解密, 计算, 查数据库什么的, 数据的发送则由系统决定. 不过我们之前谈文件的时候, 似乎没有谈过出错的情况, 那是之前的文件读写都是在本地, 出错概率很小, 但网络是长距离传输, 所以出错概率很是挺大的, 我们也需要特别说说.      网络发送的实质就是把我TCP发送缓冲区里的数据通过网络拷贝到对面的TCP接收缓冲区.
+
+有时候在调用`read, write, recv, send`这类接口时, 可能会出现阻塞的情况, 出现这种情况的原因就是, TCP的缓冲区满了或者空了, 不能再往里面写数据或者读数据, 所以系统把进程就给挂起了, 这就是等待其它计算机资源就位.
+
+另外, 由于发送接收缓冲区彼此独立, 所以可以对同一个socket一边读, 一边写, 这就叫做全双工.
+
+另外, 我们还需要说的一点是, 这个TCP的两个缓冲区, 其实也是内存中某种空间, 我们知道, Linux一切皆文件, 所以TCP的这两个缓冲区实际上就是socket文件的缓冲区, 对于文件来说, 它的实际拥有者是系统本身, 普通进程对于文件只有使用权, 系统这个进程它也有自己的地址空间, 这个地址空间用的也是虚拟地址, 其中就包含着系统中被打开文件的缓冲区, 总而言之, TCP中的缓冲区是内存中的一处空间
+
+另外, 我们也知道, 系统为了对内存这种十分关键的计算机资源进行管理, 将物理内存分为一个个页框进行管理, 每个页框的大小都是4KB, 页框都有与之对应的`struct page`, 系统把这些`struct page`集中放到某个特别的位置, 实际上就形成了一个数组,  虚拟内存通过页全局目录, 页目录, 页表这种树状结构, 就能通过下标指向`struct page`数组中的某个特定元素, 从而将虚拟地址映射到物理地址上, 然后由于物理地址有页框这种概念, 所以虚拟地址也有页框的概念, 文件缓冲区处于系统这个进程的地址空间中, 所以它也有页框的概念, 因此我们就可以对缓冲区进行一块一块的划分, 从而让整个缓冲区有数组的感觉, 这段话什么意思呢? 就是说, 通过某个数字, 是可以地定位缓冲区的某个具体位置, 这个数字其实就是下标, 至于这个数组它究竟长什么样, 我们先不考虑.
+
+下面, 我们看看TCP协议的段格式
+
+![image-20250413155330367](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250413155330455.png)
+
+我们在应用层, 一般喜欢把报文叫做"请求, 响应", 而在传输层, 我们一般把报文叫做"报文段", 所以上面说是"段格式",  "IP"层一般叫做"数据报", 链路就是"数据帧"了, 这在之前的过程中, 我们也说过. 
+
+我们首先要解答的问题是, 如果我收到一份TCP报文段, 该如何把报头和负载分离. 
+
+我们先来看看TCP的报文段, 它可以分为三部分, 一是前20字节的标准报头, 标准报头的意思是, 只要是一个报文段, 那都会有, 接着被标记为"选项"的那部分就是"非标准报头", 用得很少, 我们就不谈它了, 接下来就是数据或者说负载了. 
+
+首先我们看一下"16位源端口"和"16位目的端口", 这个很简单, 就是描述通信双方的端口号的, 没有端口号就找不到`socket`文件, 找不到`socket`就找不到进行网络通信的两个进程, 进程都找不到, 怎么进行服务呢?
+
+如果想要将报头和负载相分离, 首先你要确定整份报文段的大小, 这个大小TCP协议并不提供, 而是由IP协议提供, 我们收到的报文段是IP协议交上来的, IP协议会告诉我们这个报文段究竟有多大. 接着, 我们只需要确定报头的长度就行了, 标准报头的长度是固定的20字节, 接下来我们只要确定非标准报头的大小, 这是借助于4位首部长度来确认的, 顾名思义, 4位首都长度就是一个4比特位的数据, 描述的是报头的总长度, 需要注意的是, 它为了节省空间, 并不是直接用一字节的单位进行描述的, 毕竟4比特位最大15, 都不够20, 而是用4字节做单位的,  所以它能表示的最长长度是15 * 4 = 60字节. 当然, 选项部分可能不够4字节, 对于这种情况, 它会补齐, 它有内存对齐策略, 所以报头都是4的倍数, 这样对于一个没有选项的报文段, 4位首部长度就是5, 也就是4位首部长度的默认值`0101`, 
+
+因此, 报头和负载的分离过程是这样的, 首先TCP协议先读20个字节, 把其中的4位首部长度拿出来, 确定报头的长度, 接着把剩下的报头, 也就是选项那部分再读出来, 剩下的就是数据, 会被放到缓冲区里面.   当然, 由于它用的是位段形式, 所以可能是直接把前20字节解释成对应的结构体`struct TcpHeader`, 然后获得标准报头中的种种数据. 这样, 我们就解决了报头负载分离问题.
+
+接下来我们先离开报文段格式, 先去讲讲其它东西. 但在说其它东西之前, 我们先要特别说一点, 那就是应用层的两个进程在基于TCP协议进行网络通信的时候, 发送的都是一份绝对包含标准报头的, 完整的报文段, 收到的报文段也绝对有前20字节, 下面我们可能为了图方便, 会省略说什么传"标志位", "序号"什么东西, 但你一定要知道, 我传的不仅仅是那一个标记位, 一串序列号, 而是整个标准报头, 只不过这个报头上的标记位, 序列号被设置罢了, 看其他相关书籍的时候, 也要记住这一点.
+
+下面我们谈一下TCP保证可靠性的一种措施, 叫做"流量控制".
+
+尽管正如我们之前所说, TCP它有缓冲区, 这个缓冲区实际上socket文件的缓冲区, 这样, 应用层的进程, 它开了几个基面向字节流的socket文件, 它就有几对接收, 发送缓冲区, 但这缓冲区毕竟是有大小的, 会不会发生这样的一种情况, 那就是, 报文段确实顺利到达对面了, 也成功进行了报头和负载的分离, 也找到了与目的端口号绑定的socket文件, 但当我想把负载放进去的时候, 发现, 缓冲区快满了, 放不下了, 此时我怎么办呢? 像UDP那样扔掉吗? 那样就丢包了 
+
+其实对于TCP来说, 根本不会有上述的情况发生, 因为这其实是不可靠的表现, TCP会通过一些手段或者措施, 让发送方在发送之前就了解到接收方的缓冲区容纳能力, 如果无法容纳, 发送方就会等一会儿发, 或者把数据拆成更小的份, 这一小份接收方还能放得下, 先把这一小份发过去.  我们把这种, 依据接收方的数据容纳能力, 发送方主动调节发送速率, 或者发送的数据大小的这种措施叫做"流量控制".        有人可能说, 我知道TCP还有一个保持可靠性的措施, 叫做"丢包重传", 那能不能也不要什么"流量控制", 我发送方就闭着眼传, 对方缓冲区放不下, 那就重传呗, 这确实是一种可行的方案, 但很明显, 这种方案有些自讨苦吃了, 你明明知道对方装不下了, 还传过去, 你这不是故意要重传吗? 另外, TCP协议是系统的一部分, 系统要尽可能让计算机中的各类资源得到充分的利用, 网络也是一种资源, 也需要高利用率, 你明知道对面放不下, 为什么还要浪费网络资源, 千里迢迢把报文段传过去呢? 所以这种方案虽然可行, 但不能真的用.
+
+本来, 按照逻辑来说, 我应该去说说到底是通过什么"手段或者措施"来实现"流量控制"的, 但我们先再换一个话题, 再引入一个概念, 否则解释起来不好理解.
+
+TCP还有一个确保可靠性的机制, 叫做"确认应答".									
+
+我们先引入一个生活场景, 你到了一个很远的地方, 安全的到达了, 而你的家人很牵挂你, 你为了让他们放心, 就打了一个电话, 报了平安. 这其实就是一种确认应答, 家人不知道你有没有安全到达, 你打了个电话让他们知道你安全到达了.
+
+同样的, 发送方发了一封报文段, 它怎么知道接收方有没有收到呢? 答案是, 接收方收到这份报文段之后, 会立刻向发送方再发一封报文段, 发送方收到这份报文段, 就知道, 对方收到我刚刚发的报文段了, 那我这边就可以把发送缓冲区里面的对应数据删掉了, 如果发送端过了一段时间, 一段计算机能察觉出, 但我们察觉不出的时间, 还收不到确认应答, 那就认为对方没有收到, 那我就有可能进行重传操作.
+
+上面我们没有明确进行身份划分, 那现在我们再把应用层的身份引入进来, 重述一遍, 现在我们有`client`和`server`, 当`client`向`server`发送一封报文段后, 即使`server`的应用层并没有向自己的传输层发任何数据, TCP协议也要自己造一个空的, 没有负载的, 只有标准报头的报文段, 给`client`的传输层发过去, 这样`client`的传输层才知道自己刚刚发的负载对面成功收到了, 它才会放心的把这份负载从发送缓冲区中清除, 并且, 在传输层, 双方的地位是对等的, 并不是传输层的那种`server`被动与`client`通信的那种情况, 所以如果`server`向`client`发送一封有实际负载的报文段, `client`的传输层在收到之后, 也必须向`server`的传输层发一封确认应答报文段.
+
+下面我们可以说说"流量控制"到底是通过什么"手段或者措施"来实现的了.
+
+很明显, "流量控制"的前提是发送方(`Sender`)要知道接收方(`Receiver`)缓冲区的存储状况, 知道还剩下多少空间, 那这到底是怎么知道的呢? 其实很简单, 这就是依靠"确认应答"实现的, 让我们把时间稍微往前拨一点, 在之前, Sender就已经给Receiver发送过了一份报文段, 作为收到该报文段的回应, Receiver向Sender发回了一份"确认应答", 这份"确认应答"有着完整的标准报头, 而标准报头中就说明了Receiver的接收缓冲区剩余空间, 所以现在Sender就知道了对面剩下的空间大小.
+
+那到底是标准报头中的哪个字段描述了缓冲区的剩余大小呢? 答案就是"16位窗口大小", 不管你是谁, TCP协议在构造报头的时候都会先瞅一眼自己本端接收缓冲区的剩余大小, 然后写到16位窗口大小里, 发过去, 对端就知道了自己剩余的接收缓冲区大小, 从而实现端对端的相互流量控制. 
+
+对了, 传输层是对等的, 所以常用的称呼是发送方, 接收方, 本端, 对端, 服务端和客户端是应用层的说法, 我们这里除非涉及到具体的应用场景, 否则都不会用.
+
+接下来我们说说"确认应答"的细节, 其中包括"32位序号"和"32位确认序号"这两个位段
+
+首先我们需要认识到的是TCP协议不会对确认应答进行确认应答, 这也好理解, 真要这样做的话, 那就停不下来了, 双方一直在确认应答.  比如, 现在有两个机器, 我们将它们记为"A", "B",  现在"A"向"B"发送一份消息, "B"在收到后, 为了告知"A"自己收到了这份消息, "B"向"A"发了一封确认应答, 现在"A"收到了这份确认应答, 它就知道, 刚刚发的消息对面收到了, 也就是说, 从"A"到"B"的这个方向, 可靠性是确定的, 但现在"A"为了让"B"知道自己收到了这份确认应答, 它向"B"发送了一份确认应答, 以保证"B"到"A"这个方向上的可靠性, "B"在收到这份确认报文就知道, 自己刚刚发的确认报文对面是收到的, 但对面现在并不知道我有没有收到它发的确认应答, 所以我应该再给它发一份确认应答, 表明自己收到了"A"发的确认应答....................
+
+这样的话, 就会没完没了, 尽管当初"A"为了确保"B"知道自己收到了他发的确认应答, 而对其发送了确认应答, 这个保证"B"到"A"方向可靠性的本意是好的, 但是没有实际意义, 所以对于纯粹的确认应答, 所谓纯粹就是完全只有报头, 没有负载的那种, 我们收到之后, 就不用再向对面发送确认应答了.
+
+不过由于"A"不因为收到"B"的确认应答, 而向"B" 再发确认应答, 所以, 我们就只能确保"A"到"B"方向的可靠性, 却无法确保"B"到"A"方向的可靠性, 故而我们说没有完全可靠的通信协议, 
+
+这里要注意, 我并没有说"B"到"A"方向可靠性一直得不到保证, 而只是说, 单论  "A"收到"B"的确认应答这个场景下, "B"到"A"的方向可靠性得不到保证,但"A""B"两台机器是一直在互动的, 当"B"向"A"发送有实质内容的信息时, 确认应答就能保证"B"到"A"方向的可靠性, 但保证不了"A"到"B"方向的可靠性
+
+![image-20250414130245703](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414130245802.png)
+
+![image-20250414130653706](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414130653791.png)
+
+尽管就单个场景来说, 无法确保两个方向上的可靠性, 但多个场景合起来, 就能确保两个方向上的确认应答.    也就是说, 局部上只能保证一个方向上的可靠性, 但整体上两个方向上的可靠性都能保证.
+
+当然可能存在一种小概率事件, 那就是本端确实收到了信息, 也向对端发送了确认应答, 但对端没有收到, 所以对端就认为本端没有收到消息, 从而进行报文重传, 但这种情况也不需要太担心, 首先, 这是小概率事件, 其次, 本端有能力察觉出这是已经接受过的数据, 我们就不展开讲了.
+
+我们上面谈到了一个词, "纯粹的确认应答", 有没有不纯粹的呢? 当然是有的, 并且这实际上是更常见的情况. 这种情况实际上是一个效率优化, 比如, 如果用的都是"纯粹的确认应答", 我们平常的对话就是这样的, 
+
+A: "晚上一起去吃饭吗?"
+B: "收到"
+B: "去"
+A: "收到"
+A: "吃什么"
+B: "收到"
+B: "吃盖浇饭"
+A: "收到"
+
+这明显不太对, 所以实际上更多的场景是, 我们不单纯发一个确认应答, 而是传输层先等一小会儿, 看应用层有没有把消息的处理结果发下来, 那样我就把这个处理结果放到确认应答的负载里, 或者在发送缓冲区找点数据, 放到确认应答负载里, 总之, 尽量不要光发一个确认应答, 对于这种有数据的确认应答, 那对面收到之后, 就需要进行确认应答了, 这个确认应答答的不是报头里记录的确认应答, 而是报文里面的负载. 
+
+另外, 我们上面的这种通信, 是串行的, 收到确认应答再发下一个数据, 这样效率就会非常低下. 所以在实际通信中, 我们用的方案都是并行通信, 本端同时发送多次消息, 这样, 在理论上, 对端也要发送多个确认应答.
+
+![image-20250414133837551](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414133837641.png)
+
+不过, 这样就引发了一个问题, 尽管上图中的四个报文段, 我们依据发送时的顺序编号为"a,b,c,d",   但对面收到的顺序可不一定是"a,b,c,d", 因为网络状况是在时刻发生变化的, 所以可能恰好"a"发的时候最短的那个路由走不过去, 所以它选择了一个更长的路由, 别的报文则走了最短的那个路由.  在UDP里面, 我们也说过这种现象叫做 "乱序", "乱序"是不可靠的表现, 所以TCP也需要通过一些机制, 把乱序给修正回来.如果不修正, 应用层收到的就是无法被解析的数据
+
+因此, 我们就需要给每个报文进行编号, 把编号写到报头里, 对面收到的时候再依据编号判断是否乱序, 乱序了再修正回来, 这个编号在报文段格式里, 就是两个序号, "32位序号"和"32位确认序号", 下面, 我们就探讨一些这两个序号.
+
+我们之前说过, TCP缓冲区它是一格一格的, 或者我们可以认为, 它就是一个`char`类型的大数组, 里面的数据, 由于是直接从应用层缓冲区里面拷过来的, 所以都是符合应用层顺序要求的, 并且, 由于由于这是一个字符数组, 所以其中的每个字符都有与之对应的数组下标, 当我们要把其中的数据作为TCP报文负载发出去的时候, 就把负载中最后一个字符的数组下标作为"32位序号". 
+
+![image-20250414141259396](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414141259496.png)
+
+当对面收到数据之后, 就可以依据序号把数据填到缓冲区里, 从而在不经意间完成顺序的修正.
+
+另外, 那个"确认序号", 顾名思义就是表示确认应答和之前发送的报文之间的对应关系的, 它在数值上, 是与之相对报文的"确认序号"再加上一, 比如, 上面的那张图, 如果报文的序号是"1000, 2000, 3000, 4000", 那么与之对应的确认应答就是"1001, 2001, 3001, 4001"
+
+![image-20250414142801886](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414142801962.png)
+
+"确认序号"除了上面表示数据与确认应答映射关系的意思外, 还有一种意思, 那就是表示"确认序号之前的数据,  我已经全部收到了!", 比如, 对与上图中, 其实可以只发"4001"这一个确认应答. 由于因为"1000, 2000, 3000, 4000"都在"4001"前面, 所以只靠这一个确认应答, 我就可以知道之前发的数据对面都收到了, 还有一种意思是, 下次发送请从确认序号开始进行发送, 比如我这里收到了"4001"确认应答, 那就意味着, 下一次数据从"4001"这个位置开始,  上面这张图的序号是乱填的, 不要在意具体数值.
+
+有一个面试题, 是这样的, 为什么不能把序号和确认序号合并呢? 答案很简单, 因为它们两个根本不是一个概念, 序号说的是"我发送的数据结尾是什么", 确认序号说的是"我收到了你的第几个数据", 它们根本不是一个东西, 无法合并在一起.
+
+比如我们举个实例, 之前我们说过一个"非纯粹的确认应答", 其实它有专门的名字, 叫做"捎带应答", "捎带应答"同时存在着两种不同的信息: "我发了什么", "我收到了什么", 它们完全不能合并在一起.
+
+接下来我们去看协议段格式里面的六个标记位, 就是这部分
+
+![image-20250414153616891](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414153617019.png)
+
+这些标记位是干什么的呢? 实际上就是帮助TCP协议实现多态调用, TCP协议是用C写的, 但这并不意味着C里面没有面向对象, 继承多态的概念, 实际上, 对于系统来说, 用C实现的面向对象, 继承多态非常常见, . 只是方式不同于 C++ 或 Java 语言，而是通过结构体、函数指针、状态机等方式间接实现。
+
+在使用TCP协议进行网络通信的整个生命周期中, 会经历多个过程, 在不同的过程中, 报文所承担的职责不同, 对应的行为也就不同, 比如我们曾经略微提过, TCP有"三次握手"建立连接, "四次挥手"断开连接的机制, 只有在连接完成连接并且未启动关闭机制时可以进行通信, 此时的报文起到的就是信息传递的功能, 而在连接建立, 连接断开的过程中, 报文并不进行任何应用层方面的信息传递, 而是在进行信息传递的准备和善后操作, 对方如何知道收到的这份报文是处于什么状态呢? 那就需要查看它的六个标记位.
 
 # 完
