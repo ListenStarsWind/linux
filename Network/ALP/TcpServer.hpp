@@ -51,7 +51,6 @@ public:
 
                             std::string out_stream = _callback(inbuffer_stream);
 
-
                             if (out_stream.empty())
                                 continue;
 

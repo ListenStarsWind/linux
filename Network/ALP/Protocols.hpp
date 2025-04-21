@@ -218,7 +218,7 @@ bool unpack(std::string &in, std::string *out)
     int len = stoi(len_);
     size_t should = len + sizeof(MESSAGE_SEPARATOR);
     std::string payload = in.substr(pos + 1, should);
-    if (payload.size() < should)
+    if (payload.size() < should)            
         return false;
 
     // 存在足够长度的报文
