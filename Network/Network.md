@@ -9222,6 +9222,118 @@ TCP是传输控制协议, 它可能会把用户层数据拆开来发, 所以不�
 
 ## 连接与文件
 
+我们知道, `struct task_struct`中定义了一个`struct files_struct *`的指针, 该指针指向的对象中会含有一个`struct file*`的指针数组, 而`struct file`其实就是我们所说的文件描述附表, `struct file`里面有一个操作方法集指针`const struct file_operations  *`, 这个操作方法集里面就有一堆函数指针, 为应用层提供对应的操作方法, 实际上就是用指针实现多态, 把更底层的操作方法都封装成文件
 
+![image-20250421212650732](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421212651437.png)
+
+`struct file`里面还有一个`struct address_space  *`, 这就是指向文件缓冲区的指针.
+
+![image-20250421214148089](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421214148245.png)
+
+然后我们再看看连接那边
+
+连接的数据结构是`struct socket`
+
+![image-20250421214317428](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421214317674.png)
+
+然后我们还可以看到, `struct file`里面有一个`void* private_data*`, 这个指针指的就是被文件虚拟化的那些更底层的结构, 比如`struct socket`, 而`struct socket`也有`struct file*`指回去, 所以它们就可以双向寻找对方
+
+然后我们再看看`struct socket`里面的别的东西, 比如`wait_queue_head_t`, 它是对`struct __wait_queue_head`的类型重命名, 这个等待队列里面就有`struct list_head task_list`, `struct task_struct`里面就有`struct list_head`, 这样就可以让那些`socket`资源不到位的进程排队了, 或者说阻塞了.
+
+`struct socket`里面还有`struct proto_ops *ops`, 描述了协议的方法, 会被`file_operations  *`包装成文件的读写方法
+
+![image-20250421215541385](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421215541765.png)
+
+`struct socket`里面还有`struct sock*`, `struct sock`是连接的底层结构体, 你可以把它理解成连接的基类, 下面我们看看它的派生`struct tcp_sock, struct udp_sock`, 这两个派生类里面都封装了`struct sock`, `struct socket`指向的`struct sock`并不是纯`struct sock`, 而是在派生类`struct tcp_sock, struct udp_sock`里面的`struct sock`, 另外, 你还记得创建套接字时对其中的`family`初始化的`SOCK_STREAM, SOCK_DGRAM` , 系统就可以借助于这个字段判断这到底是在`struct tcp_sock`里面的`struct sock`还是在`struct udp_sock`里面的`struct sock`, 或者说, 是一种多态标志位.分得清自己是谁之后我们就可以通过指针强转来访问派生类的其它内容了. 另外我们还能看到`struct proto    *sk_prot_creator`, 这是`sock`的读写方法, 会被`struct proto_ops *ops`包装, 
+
+然后我们可以从`struct sock`里面找到系统内的通用报文索引, `struct sk_buff_head`, 可分为接收和读写两个结构
+
+![image-20250421224625163](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421224626180.png)
+
+![image-20250421231352133](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421231352261.png)
+
+还有`struct sk_buff_head`,  它们是对报文进行管理的结构, 你知道的, 系统里会有很多报文, 要对他们进行管理, 我们看`struct sk_buff_head`的内部定义, 可以发现这是对`struct sk_buff`的双向链表, 另外它可以认为是生产消费者模型中的那个临界资源, 所以它也有锁.
+
+`struct sk_buff`描述的就是一个个的报文
+
+![image-20250421234019190](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421234020004.png)
+
+关于`sk_buff`可以看这篇[文章](https://blog.csdn.net/qq_38107043/article/details/124160693?fromshare=blogdetail&sharetype=blogdetail&sharerId=124160693&sharerefer=PC&sharesource=venti0411&sharefrom=from_link)
+
+![image-20250421234936977](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421234937320.png)
+
+然后`struct sk_buff`里面有这四个指针
+
+![image-20250421235213708](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421235214044.png)
+
+![image-20250421235233156](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421235233242.png)
+
+这是什么意思呢? 就是说, 不管你是传输层, 网络层, 链路层, 都是系统的一部分, 只要你这个报文进了系统, 都会被`struct sk_buff`索引, 
+
+假设内存起始地址为 `0x1000`，分配了 128 字节连续缓冲区，头部预留空间如下：
+
+| 协议层                | 假设头部大小 |
+| --------------------- | ------------ |
+| 链路层（Ethernet）    | 14 字节      |
+| 网络层（IP）          | 20 字节      |
+| 传输层（TCP）         | 20 字节      |
+| 应用层数据（"Hello"） | 5 字节       |
+
+内存布局如下所示（逻辑地址，不考虑实际字节对齐）：
+
+```
+head
+ ↓
++---------+--------+--------+------------------+--------+
+| Ethernet |   IP    |  TCP   | "Hello" (5字节) | padding |
++---------+--------+--------+------------------+--------+
+↑         ↑        ↑        ↑                 ↑
+0x1000    0x100E   0x1022   0x1036            tail
+                     ↑
+                    data
+```
+
+---
+
+每一层对 `skb` 的操作如下：
+
+传输层（TCP）：
+- 初始 `data = 0x1036`，只包含 `"Hello"`
+- 调用 `skb_push(skb, 20)`，`data = 0x101C`
+- TCP 头写入 `[0x101C, 0x1036)`
+- `tail` 保持在 `0x103B`
+
+网络层（IP）：
+- 调用 `skb_push(skb, 20)`，`data = 0x1008`
+- IP 头写入 `[0x1008, 0x101C)`
+- `tail` 不变
+
+链路层（Ethernet）：
+- 调用 `skb_push(skb, 14)`，`data = 0x0FF4`
+- Ethernet 头写入 `[0x0FF4, 0x1008)`
+- `tail` 仍为 `0x103B`
+
+---
+
+最终的内存结构如下：
+
+```
+         head          data             tail          end
+          ↓             ↓                ↓             ↓
+          +-------------+----------------+-------------+
+          | 预留空间     |协议头(ETH/IP/TCP)| 应用数据     | padding |
+          +-------------+----------------+-------------+
+```
+
+---
+
+总结：
+
+- `sk_buff` 中的 `head` 是缓冲区的起点，`end` 是缓冲区末尾，这两者在整个生命周期中**不会改变**。
+- `data` 指针总是指向当前这一层协议应处理的首地址，**随着协议栈向下推进（从传输层到链路层），通过 `skb_push()` 向前移动**。
+- `tail` 指向当前缓冲区中最后一个有效字节的下一个位置，即总数据的“末尾”。
+- 每一层只需填写它的协议头，无需拷贝整个数据，**上层数据就位于下层数据之后，共享同一段内存**。
+- 报文数据（如用户数据 `"Hello"`）始终在同一位置，没有移动、没有复制，**实现真正的“零拷贝”**。
+- skb 在协议栈中传递的本质，是协议头逐层“向前添加”，数据内容保持不动，**层与层之间的交接靠的是对 `skb->data` 的指针变化，而不是数据本身的位置变化**。
 
 # 完 
