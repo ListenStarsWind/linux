@@ -10029,5 +10029,984 @@ NAT也是有缺陷的, 一是它太过关键, 容错率比较低, 出错会造�
 从协议栈角度来看, NAT主要在网络层, 代理服务器则在应用层,
 从使用范围来说, NAT在局域网的出口(不同层次的网络之间)部署, 代理服务器广域网, 局域网, 都有
 
+## 多路转接
+
+### IO模型
+
+现在, 我们重新回到应用层, 来学习高级IO中的多路转接, 为此我们先了解五种IO模型
+
+IO是我们提供网络服务时的主要性能瓶颈, 在之前的非网络系统部分, 我们已经谈过基础IO, 但因为缺乏具体的应用场景, 所以根本没有学习高级IO的平台, 但在入门网络之后, 我们就有很多的应用场景了.
+
+IO, 本质上就是在不同的存储介质中进行拷贝. 由于存储介质对于数据的容纳能力总是有限的, 所以如果一个存储介质满了, 你自然不能往里面写数据, 如果一个存储介质没有数据, 你自然就读不出来数据.当遇到这种存储介质未就位时, 我们就需要进行等待, 让存储介质满足进行读写的基本要求, 常见的等待方式, 实际上也是我们之前主要用的, 就是阻塞等待.
+
+这样的话, IO其实就是两件事, 一是等待, 等待存储介质满足要求, 二是拷贝, 如果要提升性能, 拷贝我们不好下手, 这是硬件的限制, 我们软件实际上也没有办法, 所以我们对于效率的提升方向就是让等待的相对时间减少, 让等待的时间占比下降, 绝对时间倒减少不了, 因为绝对时间也是由拷贝速率决定的.
+
+我们把能使存储介质变得可读或者是可写的条件叫做读写事件.当读写事件就绪, 就意味着存储介质中有了数据, 或者不再满了. 就可以进行读写.
+
+相对时间怎么减少呢? 大体思路上也很明显, 那就是高并发. 比如我们写网络服务, 可以使用多线程, 提高并发率, 但我们之前实际也说过, 线程池的那个网络服务, 实际上也只能进行小规模的网络服务, 因为线程虽然开销少, 但毕竟是个执行流, 还是挺多的.下面我们就会看到, 我们会用一个执行流同时管理多个IO对象, 也就是文件.
+
+下面, 我们就钓鱼这个日常生活中常见的场景, 说一下五种IO模型.  钓鱼可以简要地分成两个部分, 一是等, 二是把鱼收上来(把鱼从水拷贝到你的桶里)
+
+第一位钓鱼佬是张三, 张三性格比较固执, 他把鱼饵挂鱼钩, 把鱼鳔整理好, 就把鱼竿放进河里了, 之后张三死死握住鱼竿, 眼睛时刻盯着鱼鳔, 其它什么事都不理睬.鱼咬钩后, 他就把鱼收上来, 我们把这种IO叫做阻塞式IO
+
+第二位是李四, 李四把鱼竿放进去之后, 就刷手机了, 刷一会儿, 他就用余光看看鱼鳔, 看看有没有上钩, 在这样进行很多轮后, 李四看到了鱼鳔动了, 于是便把鱼竿收了上来, 这种就是非阻塞轮询式IO.  他不会因为事件未就位而一直死等, 会干点别的事, 然后继续.
+
+第三位是王五, 王五在鱼鳔上挂了铃铛, 把鱼竿放进河里, 固定好, 然后就不管了, 就直接躺着刷手机了, 听到铃铛声, 他就知道, 鱼就位了, 马上把鱼收上来, 我们把这种叫做信号驱动式IO
+
+第四位赵六, 开车拉了一车鱼竿, 每个鱼竿都准备好, 准备了几十个鱼竿, 然后都放进水里, 有事没事就把这几十个鱼竿都扫描一遍, 这就是我们要学的多路复用, 或者说多路转接.
+
+在这四种钓鱼方式中, 我们假设鱼上钩的概率相同, 那由于赵六有几十个鱼竿, 所以有鱼上钩的概率就会更大, 并且由于是并行等待, 所以相对等待时间就减小了.
+
+第五位, 田七, 是个大老板, 他本来是坐车路过, 看到天气很好, 又有几个钓鱼佬, 就想钓鱼吃, 于是他让司机小王停下车, 准备钓鱼, 结果, 东西还没准备好, 公司就来电话了, 说是有急事需要开会商讨, 于是田七就想, 反正我只是想吃鱼, 现在又有急事, 那就吩咐小王去钓, 他对小王说, 你把钓鱼装备拿下去, 这里有个桶, 你先去钓鱼, 我先把车开回公司, 有急事要处理, 等你把桶填满了, 打我电话, 我派人接你.. 于是小王就去钓了, 至于他具体怎么钓, 我们也不知道, 我们把田七称为"事件的发起者", 我们把田七的这种钓鱼方式, 叫做异步IO, 对田七来说, 完全不用考虑钓鱼细节, 安心干自己的事就行了, 那个小王一般来说, 就是指操作系统.
+
+我们把前四种IO称为同步IO
+
+![image-20250429193842127](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250429193842225.png)
+
+我们先比较一下阻塞IO和非阻塞式IO, 就拷贝的角度来说, 它们其实没有区别.   就等待来说, 光从IO角度来说, 其实也没有区别, 但由于非阻塞IO可以中途再做一些事, 所以效率略高.
+
+对比一下同步IO和非同步IO, 可以发现, 同步IO都要等, 只是等的方式不同, 他们都会切身进行数据的拷贝, 所以同步IO的判断依据就是执行流是否参与IO, 只要参与了等或者拷贝, 那就是同步IO, 如果不等也不拷贝, 像田七那样, 完全不参与IO的任何过程, 只是发起IO, 最后拿结果.
+
+那实际情况下, 到底主要用哪种IO呢? 其实是多路复用, 异步IO的效率不亲自控制, 而且容易逻辑混乱, 所以实际上现在已经有了很多的替代方案, 其中效率最高的, 还是多路复用, 下面我们的重点就是多路复用或者非阻塞式IO
+
+![image-20250429201657850](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250429201658125.png)
+
+我们看到, 多路转接里面有个系统接口, 叫做`select`, 这个接口不负责拷贝, 只负责等, 可以等多个文件描述符, 在用户指定的IO事件发生后, 它就会返回, 此时因为读写事件已经发生, 所以就可以直接进行读写.
+
+异步IO的`aio_read`负责为系统准备好缓冲区和数据就绪后的联系方式, 数据准备好, 内核就会通过之前约定好的方式通知用户.
+
+### fcntl  
+
+下面我们认识`fcntl  `, 该接口用来修改文件属性, 从而将读写接口由默认的阻塞模式改为非阻塞模式.
+
+把文件改成非阻塞IO, 由很多方式, 比如我们之前说的`recv`
+```c
+ssize_t recv(int sockfd, void buf[.len], size_t len, int flags);
+```
+
+我这个`man`手册比较新, 这个等价于`ssize_t recv(int sockfd, void *buf, size_t len, int flags);`, `[.len]`的意思是传入`len`大小的`buff`, 增强可读型的写法.
+
+当`flags`设置成`MSG_DONTWAIT`时, 这次`recv`就会以非阻塞方式进行, 是一次性改变文件描述符的IO模式, 不是全局性质的改变. 不过这还不够方便, 因为是一次性的, 所以一般更多的方式是使用`fcntl`接口, 全局性质地改变IO模式.
+
+```cpp
+#include <fcntl.h>
+int fcntl(int fd, int op, ... /* arg */ );
+```
+
+`op`参数描述对`fd`的操作方法, 后面的可变参数描述对应方法所需要的参数.这个`op`就是用C语言方式实现函数重载
+
+|                          op可选的宏                          |                   对应的功能                   |
+| :----------------------------------------------------------: | :--------------------------------------------: |
+|                         F_DUPFD(int)                         | 将现有的文件dup到可变参数int后最小的空闲描述符 |
+|                 F_GETFD(void)  F_SETFD(int)                  |           查看和设置文件的控制类属性           |
+|                 F_GETFL(void)  F_SETFL(int)                  |   查看和设置文件的使用类属性(IO模式在此修改)   |
+|                F_GETOWN(void)  F_SETOWN (int)                |  查看和设置文件的信号属性(信号驱动IO细节管理)  |
+| F_GETLK(struct flock*)  F_SETLK(struct flock\*)或F_SETLKW(struct flock\*) |                处理文件的锁信息                |
+
+基于fcntl, 我们可以实现一个SetNoBlock函数, 将文件描述符设置为非阻塞.
+
+```cpp
+void SetNoBlock(int fd) {
+    // f1是位图, 描述相应的文件属性
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) {
+        perror("fcntl");
+        return;
+    }
+    // 比特位传参, 在原有基础上增加非阻塞属性
+    fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+```
+
+ 下面我们写一个简单的测试程序
+
+```cpp
+#include<iostream>
+#include<unistd.h>
+#include<fcntl.h>
+#include<cstdio>
+
+using namespace std;
+
+int main()
+{
+    char buffer[1024];
+    while(true)
+    {
+        printf("Pleace input : ");
+        fflush(stdout);
+        ssize_t n = read(0, buffer, sizeof(buffer) - 1);
+        if(n > 0)
+        {
+             buffer[n-1] = 0;  // -1是为了去掉换行符
+             cout << "echo : "<<buffer<<endl;
+        }
+        else if (n == 0)
+        {
+            // 对于标准输入, 可以通过ctrl + d来结束
+            cout << "read done " << endl;
+            break;
+        }
+        else
+        {
+            cerr<<"read error "<<endl;
+        }
+
+    }
+    return 0;
+}
+```
+
+这份程序可以读取用户的标准输入, 并将其回显到标准输出上, 由于标准输入以换行号表示强制刷新, 所以每当我们敲一个回车, 我们输入的字符串就会被标准输入读取, 进而回显到标准输出上, 需要注意的是, 标准输入也会把换行号给读进去, 所以在写终止符的时候, 要写在`n-1`的地方.  `fflush(stdout);`是为了让`Pleace input : `强制刷新, 我们看到它并没有换行号, 所以默认在缓冲区里面, 直到我们主动强制刷新, 或是敲下一个换行.
+
+```shell
+[wind@starry-sky ~/linux-study/Network/Advanced_IO/fcntl]$ ./a.out 
+Pleace input : 42345
+echo : 42345
+Pleace input : 15
+echo : 15
+Pleace input : 53415
+echo : 53415
+Pleace input : 53t654
+echo : 53t654
+Pleace input : 5426y
+echo : 5426y
+Pleace input : 542y
+echo : 542y
+Pleace input : read done 
+```
+
+这就是一种阻塞等待, 用户不输入, 它就会一直等待. 现在我们把它改成非阻塞.
+
+```cpp
+#include<iostream>
+#include<unistd.h>
+#include<fcntl.h>
+#include<cstdio>
+#include<cstring>
+
+using namespace std;
+
+void SetNonBlock(int fd)
+{
+    int flags = fcntl(fd, F_GETFL);
+    if(flags == -1)
+    {
+        cerr << "fcntl get flags error" << endl;
+        return;
+    }
+    flags |= O_NONBLOCK;
+    if(fcntl(fd, F_SETFL, flags) == -1)
+    {
+        cerr << "fcntl set flags error" << endl;
+        return;
+    }
+}
+
+int main()
+{
+    SetNonBlock(0);
+    sleep(2);
+    char buffer[1024];
+    while(true)
+    {
+        printf("Pleace input : ");
+        fflush(stdout);
+        ssize_t n = read(0, buffer, sizeof(buffer) - 1);
+        if(n > 0)
+        {
+             buffer[n-1] = 0;  // -1是为了去掉换行符
+             cout << "echo : "<<buffer<<endl;
+        }
+        else if (n == 0)
+        {
+            // 对于标准输入, 可以通过ctrl + d来结束
+            cout << "read done " << endl;
+            break;
+        }
+        else
+        {
+            cerr<<"read error: "<<strerror(errno)<<"["<<errno<<"]"<<endl;
+        }
+        sleep(1);
+        // 这里sleep是为了让我们可以看到非阻塞的效果
+    }
+    return 0;
+}
+```
+
+```shell
+[wind@starry-sky fcntl]$ ./a.out 
+kcasjmdkc
+Pleace input : echo : kcasjmdkc
+vmjsklovj
+Pleace input : echo : vmjsklovj
+s;ldvkmls
+Pleace input : echo : s;ldvkmls
+Pleace input : read error: Resource temporarily unavailable[11]
+kvmskv;fPleace input : read error: Resource temporarily unavailable[11]
+\
+kmvkPleace input : echo : kvmskv;f\
+fds
+vsdfvlPleace input : echo : kmvkfds
+,sl
+Pleace input : echo : vsdfvl,sl
+Pleace input : read error: Resource temporarily unavailable[11]
+Pleace input : read done 
+```
+
+我们看到, 由于它是以非阻塞模式读写的, 所以当它读不到数据, 而又因为要立刻返回时, 就会返回错误. `Resource temporarily unavailable`, 临时资源不可用. 不过如果读到数据, 那就正常回显.
+
+`recv/read/write/send`这些接口, 在非阻塞模式下, 如果返回错误, 有两种可能, 一是真的出错, 真的函数调用出错, 二是像上面这样, 是因为资源未到位而出错, 并不是函数本身出错, 为了分辨这两种错误, 我们可以结合资源未到位的错误码`11`来进行区分, `11`有对应的宏`EWOULDBLOCK`, 
+
+```cpp
+int main()
+{
+    SetNonBlock(0);
+    char buffer[1024];
+    while(true)
+    {
+        // printf("Pleace input : ");
+        // fflush(stdout);
+        ssize_t n = read(0, buffer, sizeof(buffer) - 1);
+        if(n > 0)
+        {
+             buffer[n-1] = 0;  // -1是为了去掉换行符
+             cout << "echo : "<<buffer<<endl;
+        }
+        else if (n == 0)
+        {
+            // 对于标准输入, 可以通过ctrl + d来结束
+            cout << "read done " << endl;
+            break;
+        }
+        else
+        {
+            if(errno == EWOULDBLOCK)
+            {
+                // 非阻塞, 没有数据可读
+                cout << "read nothing" << endl;
+                // do_something(); 可以做一些别的事
+            }
+            else
+            {
+                cerr<<"read error: "<<strerror(errno)<<"["<<errno<<"]"<<endl;
+                break;
+            }
+        }
+        sleep(1);
+        // 这里sleep是为了让我们可以看到非阻塞的效果
+    }
+    return 0;
+}
+```
+
+```shell
+[wind@starry-sky fcntl]$ ./a.out 
+read nothing
+read nothing
+ca
+echo : ca
+vsdread nothing
+v
+echo : vsdv
+vfdbvfdbvdread nothing
+
+echo : vfdbvfdbvd
+read nothing
+bread nothing
+dbdbgdb
+echo : bdbdbgdb
+read nothing
+read done 
+```
+
+### select
+
+下面我们说`select`, 正如之前谈到的那样, 它是用来对多个文件等待对应的读写事件,  事件发生会立刻通知用户, 但并不进行拷贝.
+
+```cpp
+#include <sys/select.h>
+// _Nullable表示 该指针参数可以为 NULL
+// restrict编译性关键字, 不用管
+int select(int nfds, fd_set *_Nullable restrict readfds,
+           fd_set *_Nullable restrict writefds,
+           fd_set *_Nullable restrict exceptfds,
+           struct timeval *_Nullable restrict timeout);
+
+// 这些都是宏
+void FD_CLR(int fd, fd_set *set);		 // 去除指定的文件标记位
+int  FD_ISSET(int fd, fd_set *set);		 // 判断某个位置是否被标记
+void FD_SET(int fd, fd_set *set);		 // 标记某个位置
+void FD_ZERO(fd_set *set);				// 位图清零
+
+// man 2 gettimeofday
+struct timeval {
+    time_t      tv_sec;     /* 秒数 */
+    suseconds_t tv_usec;    /* 微秒数（百万分之一秒） */
+};
+```
+
+就像我们之前说的, `select`可以用来对多个文件进行等待, 很明显这意味着它要遍历进程的文件描述符表, 为了让它清楚读到哪个位置就不用继续往后读了, 就需要第一个参数`nfds`, 比如, 如果你要等的文件描述符中最大的那个是`1000`, 那就把`nfds`定为`1001`, 后面的三个`fd_set *`本质上是系统自己的一种位图结构, 下面的四个宏就是对其进行操作的接口, 它们描述了哪些文件是需要等待的, 位置不同, 具体等待的事件就不同, `readfds`表示关心可读事件的文件描述符集合, 当用户对其中的对应文件描述符进行标记时, 如果这些文件可以被读, 就是调用度接口不会被阻塞, 更严谨的说, 是不会把错误码设置成`EWOULDBLOCK`, `select`就会立刻返回,        `writefds`表示关心可写事件的文件描述符集合, `select`会对用户标记的标志位反复遍历, 当对应的文件可以写时, 就会立刻返回,     `exceptfds`描述用户关心的异常事件文件描述符集合, 常用于处理带外数据(TCP紧急指针),   这三个`fd_set*`都是输入输出参数, 当函数返回时, 里面的信息描述那些文件发生了对应的事件,         `struct timeval`, 描述等待的临界时间, 如果超过这个时间, 那就不要等了, 直接返回, 它也是输出输出参数, `select`也会对其进行修改, 等会儿实验的时候就能看到了, `timeval`全零就是非阻塞(不等), 设为`nullptr`, 就是阻塞(永久等待)
+
+`select`的返回值有三种情况, 如果是正数, 比如返回`n`, 那就是`n`个关心的事件发生了, 如果是0, 表示超时, 什么都没等到, 返回值为负数表示`select`出错了.
+
+下面我们再写网络服务, 只用`readfds`这个`fd_set *`,  顺口说一下, 如果你在意等待事件的优先级，比如希望先处理可读事件，再处理可写事件，那你可以在第一次调用 `select` 时只设置 `readfds`，等读事件处理完之后，再重新设置 `writefds`，再调用一次 `select`。通过这样的分步方式，就能模拟出“先读后写”的优先级顺序。虽然 `select` 本身不会自动安排先后顺序，但你可以靠这种方式来自己控制流程。
+
+在写代码之前, 我们结合具体场景来体会一下三个`fd_set`的作用, 比如, 最开始, 我关心的是`4, 5, 6, 7`这四个描述符对应的文件可不可读, 所以我将, 在逻辑上, 可以理解成`0000 1111`的位图`fd_set`传入了`seiect`, 注意, 我只是说逻辑上是这样, 系统对于位图的具体实现有自己的方式, 所以它留了四个接口供我们调用, 然后我们把`timeval`定为5秒, 传进去, 我们假设, 过了两秒之后, `4, 5, 6`这三个文件可以读了, 那么等到`select`回来的时候, 它就会修改`readfds`使其变为`0000 1110`这种逻辑形式, 标记为`1`表示事件就绪, 可以进行读操作, 并且这个`timeval`也被修改成了3秒. 这就是这里反复强调输入输出的原因.
+
+我们先搭一下框架
+
+```cpp
+#include"select_server.hpp"
+#include<memory>
+
+using namespace std;
+
+int main()
+{
+    unique_ptr<SelectServer> server(new SelectServer());
+    server->init();
+    server->start();
+
+    return 0;
+}
+
+
+
+
+#pragma once
+
+#include"log.hpp"
+#include"Sockst.hpp"
+#include <iostream>
+
+static uint16_t defaultport = 8080;
+
+class SelectServer
+{
+    public:
+        SelectServer(uint16_t port = defaultport):_port(port) {}
+        ~SelectServer(){ _listensock.close_();}
+
+        void init()
+        {
+            _listensock.create_();
+            _listensock.reuse_port_address();
+            _listensock.bind_(_port);
+            _listensock.listen_();
+            // print_netstat();
+        }
+
+        void start()
+        {
+
+        }
+
+    private:
+    uint16_t _port;
+    socket_ _listensock;
+};
+```
+
+然后写一下`start`
+
+```cpp
+void start()
+{
+    // 把监听套接字和普通套接字都使用`select`进行管理
+    for(;;)
+    {
+        // 对于监听套接字来说, 从连接队列中获取新连接这个行为是读事件, 所以应该设置`readfds`
+
+        fd_set readfds;
+        FD_ZERO(&readfds); // 栈上对象要清空;
+        FD_SET(static_cast<int>(_listensock), &readfds); // 把监听套接字的对应位标记上
+        struct timeval timeout;
+        timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+        cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl<<endl;
+        int n = select(static_cast<int>(_listensock) + 1, &readfds, nullptr, nullptr, &timeout);
+        if(n >= 0)
+        {
+            cout << n << "个读事件已就绪↓"<<endl;
+            bitmap_print(static_cast<int>(_listensock) + 1, readfds);
+            cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl;
+            cout<<endl;
+        }
+        sleep(1);
+    }
+}
+
+void bitmap_print(int nfds, const fd_set& bitmap)
+{
+    // 系统里的位图是静态的, 想打印也需要一个nfds
+    for(int i = 0; i < nfds; ++i)
+    {
+        cout<<FD_ISSET(i, &bitmap);
+    }
+    cout << endl;
+}
+
+```
+
+```shell
+[wind@starry-sky selectServer]$ ./select_server 
+剩余时间: 2秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 2秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 2秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 2秒
+
+^C
+[wind@starry-sky selectServer]$
+```
+
+我们发现, 对于`timeout`来说, 它最开始是两秒, 后来因为两秒结束后仍旧没有可读的事件, 所以它被修改成了0秒, 之后的下一个循环, 它(实际上已经换了一个变量)又被重新设置成两秒, 于是`select`又等了两秒, 结束后再把`timeout`修改为0秒, 这就是输入输出, 我们可以把`timeout`的定义放到循环外, 只进行一次初始化, 就像下面的这样, 我们就会发现, `select`变成了轮询非阻塞式IO, 它的`timeout`在第一次等待完后, 一直是零秒
+
+```cpp
+void start()
+{
+
+    struct timeval timeout;
+    timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+
+    // 把监听套接字和普通套接字都使用`select`进行管理
+    for(;;)
+    {
+        // 对于监听套接字来说, 从连接队列中获取新连接这个行为是读事件, 所以应该设置`readfds`
+
+        fd_set readfds;
+        FD_ZERO(&readfds); // 栈上对象要清空;
+        FD_SET(static_cast<int>(_listensock), &readfds); // 把监听套接字的对应位标记上
+        // struct timeval timeout;
+        // timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+        cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl<<endl;
+        int n = select(static_cast<int>(_listensock) + 1, &readfds, nullptr, nullptr, &timeout);
+        if(n >= 0)
+        {
+            cout << n << "个读事件已就绪↓"<<endl;
+            bitmap_print(static_cast<int>(_listensock) + 1, readfds);
+            cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl;
+            cout<<endl;
+        }
+        sleep(1);
+    }
+}
+```
+
+```shell
+[wind@starry-sky selectServer]$ ./select_server 
+剩余时间: 2秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+
+0个读事件已就绪↓
+00000
+剩余时间: 0秒
+
+剩余时间: 0秒
+```
+
+所以`timeout`要放在循环里, 进行周期性的重复设置, 另外三个`fd_set*`也是输入输出, 它们也要进行重复性设置.
+
+我们把`timeout`换成`nullptr`, 它就会变成阻塞等待.
+
+```cpp
+void start()
+{
+    // 把监听套接字和普通套接字都使用`select`进行管理
+    for(;;)
+    {
+        // 对于监听套接字来说, 从连接队列中获取新连接这个行为是读事件, 所以应该设置`readfds`
+
+        fd_set readfds;
+        FD_ZERO(&readfds); // 栈上对象要清空;
+        FD_SET(static_cast<int>(_listensock), &readfds); // 把监听套接字的对应位标记上
+        // struct timeval timeout;
+        // timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+        // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl<<endl;
+        int n = select(static_cast<int>(_listensock) + 1, &readfds, nullptr, nullptr, nullptr);
+        if(n >= 0)
+        {
+            cout << n << "个读事件已就绪↓"<<endl;
+            bitmap_print(static_cast<int>(_listensock) + 1, readfds);
+            // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl;
+            cout<<endl;
+        }
+        sleep(1);
+    }
+}
+
+```
+
+```shell
+[wind@starry-sky selectServer]$ telnet 127.0.0.1 8080
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+Connection closed by foreign host.
+[wind@starry-sky selectServer]$ 
+
+
+[wind@starry-sky selectServer]$ ./select_server 
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+1个读事件已就绪↓
+00001
+
+^C
+[wind@starry-sky selectServer]$ 
+```
+
+一旦建立新连接, 那监听套接字的可读事件就就绪了, 这里由于我们没有把连接拿上来, 所以`select`一直在通知(当然也有我们重复设置`readfds`的缘故), 下面我们就要编写处理事件的逻辑了.
+
+```cpp
+void start()
+{
+    // 把监听套接字和普通套接字都使用`select`进行管理
+    for(;;)
+    {
+        // 对于监听套接字来说, 从连接队列中获取新连接这个行为是读事件, 所以应该设置`readfds`
+
+        fd_set readfds;
+        FD_ZERO(&readfds); // 栈上对象要清空;
+        FD_SET(static_cast<int>(_listensock), &readfds); // 把监听套接字的对应位标记上
+        // struct timeval timeout;
+        // timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+        // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl<<endl;
+        int n = select(static_cast<int>(_listensock) + 1, &readfds, nullptr, nullptr, nullptr);
+        // if(n >= 0)
+        // {
+        //     cout << n << "个读事件已就绪↓"<<endl;
+        //     bitmap_print(static_cast<int>(_listensock) + 1, readfds);
+        //     // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl;
+        //     cout<<endl;
+        // }
+        if(n == 0)
+            cout << "无有效事件发生"<<endl;
+        else if(n > 0)
+            event_response(readfds);
+        else
+            cerr << "select error!"<<endl;
+
+        sleep(1);
+    }
+}
+
+void event_response(fd_set& readfds)
+{
+    cout << "开始事件响应"<<endl;
+    if(FD_ISSET(static_cast<int>(_listensock), &readfds))
+        get_new_link();
+}
+
+void get_new_link()
+{
+    string clientip;
+    uint16_t clientport;
+    int sock = _listensock.accept_(&clientip, &clientport);
+    if(sock < 0) return;
+    _log(Info, "获得一个新的客户端连接: ip:%s, 端口:%d, 占有的文件描述符为:%d", clientip.c_str(), clientport, sock);
+
+    // something
+}
+```
+
+我们先只处理监听套接字, 因为我们还没有把连接收上来
+
+```shell
+[wind@starry-sky selectServer]$ ./select_server 
+开始事件响应
+[Info][2025-5-2 15:45:37]::获得一个新的客户端连接: ip:175.24.175.224, 端口:54694, 占有的文件描述符为:5
+开始事件响应
+[Info][2025-5-2 15:46:36]::获得一个新的客户端连接: ip:127.0.0.1, 端口:42366, 占有的文件描述符为:6
+```
+
+能够看到, 它是可以把连接收上来的.  下面, 我们要考虑一个事情, 在收上来一个连接之后, 我们要立刻对其进行读写操作, 或者是建立会话层吗? 
+
+答案是不行, 我们要知道为什么要学多路转接, 我们知道, 应用层大多采用的是`cs`模式, 这意味着, 服务端要同时处理多个客户端请求, 之前我们没有办法, 所以又建立了一个执行流, 比如一个子进程, 又或者一个线程, 但不过怎么样, 这都需要建立新的执行流结构, 从而拖累我们的服务端效率, 所以我们要学多路转接, 我们学习多路转接的目的就是用一个执行流去同时控制多个文件, 监听套接字, 我要交给`select`来等, 如果我直接获取新连接, 那会造成单执行流的阻塞, 就不能处理客户端发来的数据, 同样的, 对于一个新连接来说, 我们同样也不能直接对其进行读, 因为可能它并没有数据, 所以也会卡住我这一个执行流, 从而无法获取新连接和处理别的客户发来的数据.
+
+所以我们要把新获得的连接写到`readfds`里, 让`select`去等待, 我本身只会在文件可读的情况对其进行读操作. 为了让之后循环回去对`readfds`重新进行标记的时候, 能找到这些收上来的连接, 我们需要维护一个缓冲区, 刚开始, 我们就用最简单的静态数组, 去存储那些需要被`readfds`标记的文件描述符.
+
+下面, 问题又来了, 静态数组该设置成多大呢? 既然我们的缓冲区是为`readfds`而存在的, 那么, `readfds`能标记多少文件, 我就设置成多大的大小, 在之前写的代码中, 我曾用注释说过, `fd_set`是静态的位图, 所以它的大小是固定的
+
+```cpp
+void bitmap_print(int nfds, const fd_set& bitmap)
+{
+    // 系统里的位图是静态的, 想打印也需要一个nfds
+    for(int i = 0; i < nfds; ++i)
+    {
+        cout<<FD_ISSET(i, &bitmap);
+    }
+    cout << endl;
+}
+```
+
+我们可以直接查看它的个数
+
+```cpp
+int main()
+{
+    cout <<"fd_set的比特位个数:"<< sizeof(fd_set)*8<<endl;
+
+    // unique_ptr<SelectServer> server(new SelectServer());
+    // server->init();
+    // server->start();
+
+    return 0;
+}
+```
+
+```shell
+[wind@starry-sky selectServer]$ ./select_server 
+fd_set的比特位个数:1024
+```
+
+也就是说, `fd_set`以及依赖于`fd_set`的`select`, 最多能托管1024个文件, 不过这个1024可能因为平台的不同而不同, 所以我们编码的时候, 还是使用`sizeof(fd_set)*8`的方式获得最大文件托管个数.
+
+![image-20250502171549182](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502171549314.png)
+
+![image-20250502171610434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502171610570.png)
+
+其中用到了`fill`初始化`fds`, `fill`和`memset`功能相同, 区别是`memset`只能以字节为单位初始化, 但`fill`可以为非字节类型, 比如这里的整型类型进行初始化. 前面两个参数是迭代器. 表示首尾.
+
+这样的话, 在收到新连接之后, 我们就应该在`fds`中找一个空闲的位置, 把新连接的描述符放进去. 如果找不到, 那没办法, 毕竟我们的`_fds`静态数组的大小是受到`fd_set`比特个数的限制的, 此时我们只能把这个新拿上来的连接丢弃.
+
+```cpp
+void get_new_link()
+{
+    string clientip;
+    uint16_t clientport;
+    int sock = _listensock.accept_(&clientip, &clientport);
+    if(sock < 0) return;
+    _log(Info, "获得一个新的客户端连接: ip:%s, 端口:%d, 占有的文件描述符为:%d", clientip.c_str(), clientport, sock);
+
+    // something
+    add_link(sock);
+}
+
+void add_link(int sock)
+{
+    int idx = 1;
+    while(idx < max_managed_fds && _fds[idx] != -1) ++idx;
+    if(idx == max_managed_fds)
+    {
+        _log(Warning, "托管数目超出限制, 连接关闭:%d", sock);
+        close(sock);
+    }
+    else
+        _fds[idx] = sock;
+}
+```
+
+之后我们重新回到循环, 我们需要对`readfds`重新进行设置, 因为客户端的先后关闭顺序会不同, 所以会导致有效的描述符不是凑在一起的, 所以我们也要跳着确认.
+
+```cpp
+int fd_set__(fd_set& fds)
+{
+    int end = 0;
+    cout << "被托管的文件描述符: ";
+    for(int i = 0; i < max_managed_fds; ++i)
+    {
+        if(_fds[i] != -1)
+        {
+            cout << _fds[i]<<" ";
+            FD_SET(_fds[i], &fds);
+            end = max(_fds[i], end);
+        }
+    }
+    cout << endl;
+    return end + 1;
+}
+```
+
+```cpp
+void start()
+{
+    _fds[0] = _listensock;
+    // 把监听套接字和普通套接字都使用`select`进行管理
+    for(;;)
+    {
+        // 对于监听套接字来说, 从连接队列中获取新连接这个行为是读事件, 所以应该设置`readfds`
+
+        fd_set readfds;
+        FD_ZERO(&readfds); // 栈上对象要清空;
+        int nfds = fd_set__(readfds);
+        // FD_SET(static_cast<int>(_listensock), &readfds); // 把监听套接字的对应位标记上
+        // struct timeval timeout;
+        // timeout.tv_sec = 2; timeout.tv_usec = 0; // 等待两秒
+        // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl<<endl;
+        int n = select(nfds, &readfds, nullptr, nullptr, nullptr);
+        // if(n >= 0)
+        // {
+        //     cout << n << "个读事件已就绪↓"<<endl;
+        //     bitmap_print(static_cast<int>(_listensock) + 1, readfds);
+        //     // cout << "剩余时间: "<<timeout.tv_sec<<"秒"<<endl;
+        //     cout<<endl;
+        // }
+        if(n == 0)
+            cout << "无有效事件发生"<<endl;
+        else if(n > 0)
+            event_response(readfds);
+        else
+            cerr << "select error!"<<endl;
+
+        //sleep(1);
+    }
+}
+```
+
+之后如果我们关心的文件可以读了, `select`就会返回, 让我们进行处理, 因为现在已经有客户端的连接了, `select`可能也是因为客户端发来消息而返回的, 所以我们需要为用户端连接建立会话, 确认它们(用户连接)是否准备就绪, 也是依靠`_fds`进行遍历扫描的.
+
+```cpp
+void event_response(fd_set& readfds)
+{
+    cout <<endl<< "开始事件响应"<<endl;
+    if(FD_ISSET(static_cast<int>(_listensock), &readfds))
+        get_new_link();
+    for(int i = 1; i < max_managed_fds; ++i)
+    {
+        if(_fds[i] != -1 && FD_ISSET(_fds[i], &readfds))
+            session(i);
+    }
+}
+
+// 我们先不考虑面向字节流而导致的粘包问题
+// 后面还有更好的多路转接方案, 到时候我们再严谨的走一遍整个流程
+void session(int idx)
+{
+    _log(Info, "收到一个新的消息, 来自%d", _fds[idx]);
+
+    char buff[64] = {0};
+    int n = read(_fds[idx], buff, sizeof(buff));
+    if(n > 0)
+    {
+        buff[n] = 0;
+        cout << "用户说: "<<buff<<endl;
+    }
+    else if(n == 0)
+    {
+        _log(Warning, "用户退出了连接");
+        close(_fds[idx]);
+        _fds[idx] = -1;
+    }
+    else
+    {
+        _log(Warning, "错误的读数据");
+        close(_fds[idx]);
+        _fds[idx] = -1;
+    }
+
+    cout << endl;
+}
+```
+
+```shell
+[wind@starry-sky selectServer]$ ./select_server 
+被托管的文件描述符: 4 
+
+开始事件响应
+[Info][2025-5-2 18:21:23]::获得一个新的客户端连接: ip:127.0.0.1, 端口:45932, 占有的文件描述符为:5
+被托管的文件描述符: 4 5 
+
+开始事件响应
+[Info][2025-5-2 18:21:25]::收到一个新的消息, 来自5
+用户说: dxdsacac
+
+
+被托管的文件描述符: 4 5 
+
+开始事件响应
+[Info][2025-5-2 18:21:28]::获得一个新的客户端连接: ip:175.24.175.224, 端口:36976, 占有的文件描述符为:6
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:29]::收到一个新的消息, 来自6
+用户说: cdsvcsdv
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:34]::收到一个新的消息, 来自6
+用户说: csadcsac
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:36]::收到一个新的消息, 来自6
+用户说: s
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:38]::收到一个新的消息, 来自5
+用户说: csdvcdsvc
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:39]::收到一个新的消息, 来自5
+用户说: sdvdsv
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:39]::收到一个新的消息, 来自5
+用户说: sddv
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:40]::收到一个新的消息, 来自5
+用户说: vds
+
+
+被托管的文件描述符: 4 5 6 
+
+开始事件响应
+[Info][2025-5-2 18:21:45]::获得一个新的客户端连接: ip:112.26.31.132, 端口:53449, 占有的文件描述符为:7
+被托管的文件描述符: 4 5 6 7 
+
+开始事件响应
+[Info][2025-5-2 18:24:53]::收到一个新的消息, 来自6
+[Warning][2025-5-2 18:24:53]::用户退出了连接
+
+被托管的文件描述符: 4 5 7 
+```
+
+这样我们就用一个执行流同时维持着多个连接.
+
+我们看到, `select`与我们之前的同步IO服务相比, 在效率上可以说已经有了质的飞跃, 但`select`本身因为当前设计时的时代局限性, 也有很明显的缺点, 那就是`select`总是会被`fd_set`的比特位个数给限制住, 虽然我们知道系统能开的文件个数确实是有限的, 但一定比1024多得多, 这样就会很亏, 发挥不了系统的全部性能, 1024在`select`刚开始设计出来的时候, 看起来是个遥不可及的数字, 但随着网络的快速发展, 1024这个个数已经不能满足当前的网络服务需求了, 这就是`select`的一大缺点, 我们可以通过`ulimit -a`查看本机中一个进程最多能打开的文件个数, 一般来说是一二十个, 但我这里是云服务器, 系统的参数设置默认就是实际的引用参数, 所以是65535个, 和1024相比, 65535还是大上不少的.
+
+```shell
+[wind@starry-sky selectServer]$ ulimit -a
+real-time non-blocking time  (microseconds, -R) unlimited
+core file size              (blocks, -c) 0
+data seg size               (kbytes, -d) unlimited
+scheduling priority                 (-e) 0
+file size                   (blocks, -f) unlimited
+pending signals                     (-i) 6205
+max locked memory           (kbytes, -l) 206476
+max memory size             (kbytes, -m) unlimited
+open files                          (-n) 65535  
+pipe size                (512 bytes, -p) 8
+POSIX message queues         (bytes, -q) 819200
+real-time priority                  (-r) 0
+stack size                  (kbytes, -s) 8192
+cpu time                   (seconds, -t) unlimited
+max user processes                  (-u) 6205
+virtual memory              (kbytes, -v) unlimited
+file locks                          (-x) unlimited
+[wind@starry-sky selectServer]$ 
+```
+
+`select`的另一个缺点就是拷贝的次数太多了, 因为它有四个输出输出参数, 我们也看到, 每次我们都必须重新设置`fd_set`和`timeval`, 尽管它是线性的设置时间, 但如果要托管的文件很多, 那还是要一定时间的, 还有一个缺点, 就是遍历的时候太费劲了, 无论对于内核还是用户都是这样, 用户要遍历1024次, 设置`fd_set`, 当有事件就绪时, 也要遍历1024, 找出准备好的文件, 对于内核来说, 它也要一个个的找, 确认用户关心的文件有没有准备好.
+
+### poll
+
+
 
 # 完 
