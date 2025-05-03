@@ -11007,6 +11007,388 @@ file locks                          (-x) unlimited
 
 ### poll
 
+有需求就有解决方案, 既然`select`有这么多的缺点, 于是就出现了基于`select`类似底层逻辑的`poll`, 最为多路转接的其它选择., 如果弄清楚了`select`, `poll`会非常简单, 由于底层逻辑类似, 所以我们可以直接在`select`的代码基础上进行修改.
 
+```cpp
+#include <poll.h>
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout);
+```
+
+和`select`目的相同, `poll`也只负责等, 它是为了解决`select`的两个问题, 一是可以管控的文件数目太少, 二是每次都需要重新设置`fd_set, timeout`而生的.
+
+`poll`的返回值和`select`类似, 表示可以处理的事件个数, 为零, 就是超时, 什么都没等到, 为负数, 就是`select`本身出现了错误,      之后是第一个参数`struct pollfd *fds`, 这实际上是一个数组中首元素的指针, `nfds`和表示数组的大小, `timeout`现在用整型表示, 单位是毫秒, 这样的话, 2秒就是2000毫秒,  设置成0表示不阻塞, 设置成-1表示永久阻塞.
+
+在使用`poll`时, 要在应用层上维护一个数组, 数组中存储的元素类型是`struct pollfd`
+
+```cpp
+struct pollfd {
+    int   fd;         /* file descriptor */
+    short events;     /* requested events */
+    short revents;    /* returned events */
+};
+```
+
+其中`fd`表示要关心的文件描述符, `events`用于告诉内核对该`fd`要关心的是事件, `revents`用于获知该文件是否准备就绪.以前`select`对于事件信息的传输使用输入输出函数, 就像是单车道, 而对于`poll`来说, 内核读`events`, 然后检测, 把结果写回到`revents`, 于是在应用层我们就可以直接看`revents`.它是双车道, 两个车道之间不会相互干扰, 所以只要最开始把`events`初始化完后就行了, 不需要再次初始化,          并且由于它是数组, 所以理论上想设多大就设多大.
+
+![image-20250502195628492](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502195628715.png)
+
+我们关心读的话, 只要把对应的`events`设置成`POLLIN`就行了, 如果回来的时候发现`revents`也是`POLLIN`, 那就可以进行读了, 这些值是以比特位传参的形式进行设置的, 比如如果你既关心可读, 也关心可写, 就可以把`POLLIN | POLLOUT`传进`events`.
+
+```cpp
+#pragma once
+
+#include"log.hpp"
+#include"Sockst.hpp"
+#include <poll.h>
+#include <iostream>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <string>
+#include <algorithm>
+
+
+using namespace std;
+
+static const short POLLNEVT = 0;            // events的缺省参数, 表示不关心任何事件
+static const int defaultfd = -1;
+static const int max_managed_fds = 64;      // 可以随便改, 只要系统受得住
+static const uint16_t defaultport = 8080;
+
+class PollServer
+{
+    public:
+        PollServer(uint16_t port = defaultport):_port(port) {
+            struct pollfd d;
+            d.fd = defaultfd;           // 系统会跳过无效的描述符
+            d.events = POLLNEVT;
+            d.revents = POLLNEVT;
+            fill(_fds, _fds + max_managed_fds, d);
+        }
+
+        ~PollServer(){ _listensock.close_();}
+
+        void init()
+        {
+            _listensock.create_();
+            _listensock.reuse_port_address();
+            _listensock.bind_(_port);
+            _listensock.listen_();
+            _fds[0].fd = _listensock;
+            _fds[0].events = POLLIN;
+        }
+
+        void start()
+        {
+            const int timeout = 2000;
+            for(;;)
+            {
+                int n = poll(_fds, max_managed_fds, timeout);
+                if(n == 0)
+                    cout << "无有效事件发生"<<endl;
+                else if(n > 0)
+                    event_response();
+                else
+                    cerr << "poll error!"<<endl;
+            }
+        }
+
+        void event_response()
+        {
+            cout <<endl<< "开始事件响应"<<endl;
+            if(_fds[0].revents == POLLIN)
+                get_new_link();
+            for(int i = 1; i < max_managed_fds; ++i)
+            {
+                if(_fds[i].fd != -1 && _fds[i].revents & POLLIN) // 按位或也可以
+                    session(i);
+            }
+        }
+
+        // 我们先不考虑面向字节流而导致的粘包问题
+        // 后面还有更好的多路转接方案, 到时候我们再严谨的走一遍整个流程
+        void session(int idx)
+        {
+            _log(Info, "收到一个新的消息, 来自%d", _fds[idx]);
+            char buff[128] = {0};
+            int n = read(_fds[idx].fd, buff, sizeof(buff));
+            if(n > 0)
+            {
+                buff[n] = 0;
+                cout << "用户说: "<<buff<<endl;
+            }
+            else if(n == 0)
+            {
+                _log(Warning, "用户退出了连接: %d", _fds[idx].fd);
+                close(_fds[idx].fd);
+                _fds[idx].fd = defaultfd;
+            }
+            else
+            {
+                _log(Warning, "错误的读数据");
+                close(_fds[idx].fd);
+                _fds[idx].fd = defaultfd;
+            }
+
+            cout << endl;
+        }
+
+        void get_new_link()
+        {
+            string clientip;
+            uint16_t clientport;
+            int sock = _listensock.accept_(&clientip, &clientport);
+            if(sock < 0) return;
+            _log(Info, "获得一个新的客户端连接: ip:%s, 端口:%d, 占有的文件描述符为:%d", clientip.c_str(), clientport, sock);
+
+            add_link(sock);
+        }
+
+        void add_link(int sock)
+        {
+            int idx = 1;
+            while(idx < max_managed_fds && _fds[idx].fd != defaultfd) ++idx;
+            if(idx == max_managed_fds)
+            {
+                // 由于poll已经不受到fd_set的限制, 所以现在也可以扩容
+                // 或者把_fds换成vector
+                _log(Warning, "托管数目超出限制, 连接关闭:%d", sock);
+                close(sock);
+            }
+            else
+            {
+                _fds[idx].fd = sock;
+                _fds[idx].events = POLLIN;
+            }
+        }
+
+    private:
+    uint16_t _port;
+    socket_ _listensock;
+    struct pollfd _fds[max_managed_fds];
+    Log &_log = Log::getInstance();
+};
+```
+
+```shell
+[wind@starry-sky pollServer]$ ./poll_server 
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:0:45]::获得一个新的客户端连接: ip:175.24.175.224, 端口:50346, 占有的文件描述符为:5
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:0:56]::获得一个新的客户端连接: ip:127.0.0.1, 端口:54836, 占有的文件描述符为:6
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:0:59]::收到一个新的消息, 来自6
+用户说: sacfdsvfcsd
+
+
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:6]::收到一个新的消息, 来自5
+用户说: ascdsc
+
+
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:13]::获得一个新的客户端连接: ip:112.26.31.132, 端口:53457, 占有的文件描述符为:7
+
+开始事件响应
+[Info][2025-5-2 21:1:15]::收到一个新的消息, 来自7
+用户说: cd
+
+
+开始事件响应
+[Info][2025-5-2 21:1:15]::收到一个新的消息, 来自7
+用户说: s
+
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:19]::收到一个新的消息, 来自7
+用户说: q
+
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:23]::收到一个新的消息, 来自7
+用户说:  
+
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:32]::收到一个新的消息, 来自7
+用户说: }
+
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:43]::收到一个新的消息, 来自7
+[Warning][2025-5-2 21:1:43]::用户退出了连接: 7
+
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:48]::收到一个新的消息, 来自6
+用户说: sacdsac
+
+
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:1:53]::收到一个新的消息, 来自6
+[Warning][2025-5-2 21:1:53]::用户退出了连接: 6
+
+无有效事件发生
+无有效事件发生
+无有效事件发生
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:2:2]::收到一个新的消息, 来自5
+用户说: ascds
+
+
+无有效事件发生
+
+开始事件响应
+[Info][2025-5-2 21:2:4]::收到一个新的消息, 来自5
+[Warning][2025-5-2 21:2:4]::用户退出了连接: 5
+
+无有效事件发生
+无有效事件发生
+^C
+[wind@starry-sky pollServer]$ 
+```
+
+`poll`可以管控的文件数目已经不由它自身限制了, 对于`select`来说, 只能管理1024个文件是因为`select`用的是`fd_set`, `fd_set`最多标记1024个文件, 但对于`poll`来说, 它当然也有上限, 65535, 但这个65535是系统层面的上限, 不是`poll`的上限, 所以我们说,, `poll`的文件管理数目无上限. 
+
+不过, `poll`仍旧没有解决一个问题, 那就是它的遍历方式仍旧是是线性遍历, 一个一个地看`_fds`中`struct pollfd`的`fd`和`revents`, 而且由于`poll`无管理上限, 所以相比`select`, 这种一个个遍历的方式会造成更大的时间浪费. 所以随着`poll`管理的文件个数越来越多时, 它的效率就会增长的越来越慢, 甚至倒退.而且这种遍历对于用户和内核都要进行. 所以现在我们的需求就是, 不要这样一个个的遍历.
+
+### epoll
+
+epoll正是为了解决这个问题而生的, 尽管`epoll`中带了`poll`, 但实际上, `epoll`的底层已经和`poll`完全不同, 是Linux公认的目前效率最高的网络服务方案, 实际上, 目前市面上主流的服务器框架, 用的都是`epoll`, 所以`epoll`是多路转接的重点.
+
+先让我们认识一下`epoll`的接口.
+
+```cpp
+#include <sys/epoll.h>
+
+int epoll_create(int size);
+int epoll_create1(int flags);
+```
+
+`epoll_crate`用于构建一个`epoll`模型或者是对象, 参数`size`目前已经被废弃了, 只要大于零就可以. `epoll_create1`是一个新出来的接口, 我们这里不用. `epoll_create`成功, 返回一个文件描述符, 失败, 则返回-1.
+
+```cpp
+#include <sys/epoll.h>
+
+int epoll_wait(int epfd, struct epoll_event *events,
+               int maxevents, int timeout);
+```
+
+`epoll_wait`用于等待事件就绪, `epfd`就是`epoll`模型的文件描述符, 就是之前`epoll_create`返回的那个, `events, maxevents`描述了应用层缓冲区, `epoll_wait`会把已经就绪的时间直接写到这个缓冲区中, 而不需要我们自己判断哪些事件就绪, `timeout`单位仍旧是毫秒.   返回值表示向用户层缓冲区写入的已经就绪的事件个数.
+
+```cpp
+struct epoll_event {
+    uint32_t      events;  /* Epoll events */
+    epoll_data_t  data;    /* User data variable */
+};
+
+union epoll_data {
+    void     *ptr;
+    int       fd;
+    uint32_t  u32;
+    uint64_t  u64;
+};
+
+typedef union epoll_data  epoll_data_t;
+```
+
+`events`描述关心的事件,和`poll`的`events`类似, 其实也是位图的形式, 或者说是比特位传参的那种感觉,  `epoll_data`是一个联合体, 给用户提供多种方式表述文件, 你可以使用文件描述符, 也可以使用别的自己在应用层定义的文件描述方式. 反正通过`epoll_data`就能让用户找到关心的文件.
+
+`epoll_ctl`用来对`epoll`模型进行各种操作, 比如, 添加一个新的要关心的文件及其事件, 或者对其进行查看修改, 以及把一个文件从`epoll`中移除
+
+```cpp
+#include <sys/epoll.h>
+
+int epoll_ctl(int epfd, int op, int fd,
+              struct epoll_event *_Nullable event);
+
+// op选项
+// EPOLL_CTL_ADD  添加一个事件
+// EPOLL_CTL_MOD  修改一个事件
+// EPOLL_CTL_DEL  去除一个事件
+```
+
+`epfd`就是`epfd`的虚拟文件描述符, `op`是操作类型, `fd`是与之相关的文件, `event`就是对应的事件.
+
+我们看到, 相比`select, poll`, `epoll`不需要我们亲自遍历那些文件是就绪的, 而是直接把就绪文件的句柄直接写到应用层的缓冲区上, 这个缓冲区里面的文件, 就都是已经就绪的文件.  我们也不需要在应用层维护一个事件管理的数据结构, 就像是`select`和`poll`里的`fds`, `epoll`能实现这些, 就是因为`epoll`自己采用了一个更高效的数据结构, 红黑树, 它会把准备好的事件直接写到`epoll_wait`里面的`struct epoll_event *`缓冲区.
+
+在深入理解 `epoll` 之前，我们先回顾传统多路复用接口如 `select` 和 `poll` 的基本原理。
+
+![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410111425950.png)
+
+从操作系统的分层结构来看，网络通信涉及到用户空间的应用程序、内核空间的网络协议栈，以及更底层的网卡和驱动程序。在这个模型中，应用程序通常通过文件描述符与内核交互，而这些描述符的底层可能关联的是套接字、管道或其他类型的文件。
+
+`select` 和 `poll` 作为传统的 I/O 多路复用机制，其核心思路是：应用层每次调用时提供一个关心的事件集合（如 `fd_set` 或 `pollfd` 数组），内核根据当前执行流所关联的文件描述符表，逐一检查这些文件是否就绪。由于内核并不保存这份事件集合的状态，每次调用都必须重新传入、重新遍历，这种机制天然地导致了 O(n) 级别的线性扫描成本。
+
+更具体地说，尽管内核知道当前执行流是谁、也知道它持有哪些文件描述符，但它并不知道你关心的是这些描述符中的哪几个、关心的是读事件还是写事件。因此，每次调用 `select` 或 `poll`，都要将整个事件集合从用户态拷贝到内核态，内核再逐个比对是否满足就绪条件。这种重复遍历不仅浪费资源，也限制了这类接口在高并发场景下的扩展性。
+
+这种以用户态驱动检测、内核态被动遍历的模式，正是 `epoll` 所试图优化的关键点 —— 在后续的 `epoll` 分析中，我们将看到它通过在内核中持久保存事件集合、基于就绪链表唤醒机制，极大地减少了无效扫描和系统调用开销。
+
+我们知道，操作系统对硬件的管理是基于中断驱动机制的。当网卡上有数据到达时，会向 CPU 发出中断信号，触发系统执行相应的中断服务程序。随后，驱动程序会将数据从网卡搬运至内存，并构造一个 `sk_buff` 结构，将其交由内核网络协议栈处理。
+
+为了高效地支持事件通知，`epoll` 在内核中引入了三项关键机制：
+
+1. 红黑树（rbtree）：每个调用 `epoll` 的进程，内核都会为其维护一棵红黑树，用于记录用户关心的文件描述符及其关注的事件类型（如 `EPOLLIN`、`EPOLLOUT` 等）。红黑树是一种近似平衡的搜索树，支持高效的插入、删除和查找操作，适用于大量事件的快速组织与定位。
+
+   红黑树的节点中，既包含用户注册的 `fd` 和对应的 `event`，也包含指向实际文件对象、socket 等结构的内核指针。这里使用的是内核中常见的“结构内指针”组织方式（例如 `list_head`、`rb_node` 等），即数据结构中直接嵌入用于链表或树的节点成员，实现零额外内存分配的高效链接。
+
+2. 就绪队列（ready list）：内核还为每个 epoll 实例维护一个就绪队列，用于存放已经触发的事件。这些事件由红黑树中的节点派生而来，当某个 `fd` 的状态发生变化，并满足用户关注的事件类型时，就会生成相应的就绪节点，加入到队列中，等待用户调用 `epoll_wait` 来取出处理。
+
+3. 事件驱动机制与回调绑定：当网络数据通过协议栈逐层上传，例如通过 `sk_buff` 到达 `struct socket`，而 `socket` 又与 `struct file` 关联，因此系统可以定位到对应的文件描述符。这时，内核会触发该文件对象中注册的回调函数 `ep_poll_callback()`，它会尝试在 epoll 实例对应的红黑树中查找是否存在对该 `fd` 及其事件感兴趣的节点。若找到匹配的监听项，就将其加入就绪队列中，并唤醒正在阻塞于 `epoll_wait()` 的用户进程。
+
+   这种事件驱动与回调机制正是 epoll 高效的根本所在：不再需要像 `select`/`poll` 那样轮询遍历所有 fd，而是由内核在状态变化时主动通知，做到“谁变化、谁上报”。
+
+这三者共同构成了一个完整的 epoll 实例：它既具备事件注册的能力，也能高效地追踪事件状态并在条件满足时进行就绪通知。整个机制基于红黑树、就绪队列与唤醒回调三大核心结构，逻辑清晰、性能优越。
+
+此外，内核还将 epoll 实例封装为一个特殊的内核对象，并分配一个文件描述符供用户空间使用。虽然它具备 `struct file` 实例，但并不支持像常规文件那样通过 `read` 读出事件内容，真正的事件获取仍需通过专用接口如 `epoll_wait` 实现。因此，这种“文件化”更多是一种资源管理上的统一抽象，而非通用文件语义的赋予。
+
+在较为了解 `epoll` 的内部机制后，我们回过头来，再看它对外暴露的三个核心接口及其实际意义：
+
+- **`epoll_create`**：用于在内核中创建一个 epoll 实例，并返回一个文件描述符。这个描述符代表了该实例的整个生命周期，用户后续的所有操作都会通过它来进行。内核同时会初始化对应的红黑树、就绪队列等核心数据结构，并将该实例封装为一个特殊的文件对象，统一以“文件”视角供用户空间调用。
+- **`epoll_ctl`**：用于向 epoll 实例中添加、修改或删除监控的文件描述符，实质上就是对那棵红黑树进行增删改操作。每次调用 `epoll_ctl`，用户都在明确告诉内核：我希望对哪个 `fd` 感兴趣、希望监控哪些事件。这些信息就作为节点插入或更新到红黑树中。
+- **`epoll_wait`**：用于从就绪队列中获取已触发的事件，同时在没有就绪事件时挂起调用线程，进入休眠状态。`epoll_wait` 本质上是一种“事件等待机制” —— 它陷入内核后，由内核负责在事件到来时唤醒用户进程，并将就绪的事件信息填入用户提供的数组中返回。其内部逻辑会检查就绪队列是否为空，若为空则挂起等待；若不为空，则直接返回当前已就绪的事件。
+
+传统的 `select` 和 `poll` 是用户驱动机制，它们依赖用户每次调用时传入一整套文件描述符集合，内核每次都要遍历这些集合并检查状态，效率低下、尤其在高并发场景下开销显著。事件是否到达，完全由用户主动轮询驱动。
+
+而 `epoll` 是事件驱动机制，它在内核中为进程维护事件注册表和就绪队列，事件状态的变化由内核主动感知，并在条件满足时将其加入就绪队列。用户只需调用 `epoll_wait` 阻塞等待，内核会在事件就绪时主动唤醒。这样实现了“谁关心谁监听、谁就绪谁上报”的模型，大幅提升了性能与可扩展性。
+
+这也体现出一个
 
 # 完 
