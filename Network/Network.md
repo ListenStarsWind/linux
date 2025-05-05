@@ -11389,6 +11389,386 @@ int epoll_ctl(int epfd, int op, int fd,
 
 而 `epoll` 是事件驱动机制，它在内核中为进程维护事件注册表和就绪队列，事件状态的变化由内核主动感知，并在条件满足时将其加入就绪队列。用户只需调用 `epoll_wait` 阻塞等待，内核会在事件就绪时主动唤醒。这样实现了“谁关心谁监听、谁就绪谁上报”的模型，大幅提升了性能与可扩展性。
 
-这也体现出一个
+下面我们来写一个`epoll`的代码
+
+首先为了防止有人对我们的各种对象进行拷贝操作, 当然我们可以禁用各种类的拷贝赋值这些默认成员函数, 但, 这样做有些麻烦, 所以对于防拷贝的实现, 我们还可以特别设置一个不能被拷贝的空类型, 然后让其成为那些不能被拷贝类型的成员变量, 这样即使因为有个成员无法被拷贝, 所以这些类就会变得不能被拷贝.
+
+```cpp
+#pragma once
+
+class NonCopy
+{
+    protected:
+    NonCopy() = default;
+    NonCopy(const NonCopy& ) = delete;
+    const NonCopy& operator=(const NonCopy& ) = delete;
+};
+```
+
+由于系统在形式上是面向过程的, 所以我们要把`epoll`稍微封装一下, `::`的意思是指明使用系统的接口, 可读性更高
+
+```cpp
+#pragma once
+
+#include"log.hpp"
+#include<cstring>
+#include"NonCopy.hpp"
+#include<sys/epoll.h>
+
+static const int epoll_size = 80;
+
+class Epoller : public NonCopy
+{
+    public:
+    Epoller() {
+        _epoll_fd = ::epoll_create(epoll_size);
+        if(_epoll_fd == -1)
+        {
+            _log(Fatal, "epoll实例化失败:%s", strerror(errno));
+            exit(0);
+        }
+    }
+
+    ~Epoller() {
+        ::close(_epoll_fd);
+    }
+
+    private:
+    int _epoll_fd;
+    wind::Log &_log = wind::Log::getInstance();
+};
+```
+
+至于`epoll`服务器, 我们先把和`poll, select`相同的那部分写上
+
+````cpp
+#pragma once
+
+#include<memory>
+#include"log.hpp"
+#include"TcpSocket.hpp"
+#include"Epoller.hpp"
+#include"NonCopy.hpp"
+
+static const int default_port = 8080;
+
+class EpollServer : public NonCopy
+{
+    public:
+    EpollServer(uint16_t epoll_server_port = default_port) : _epoll_server_port(epoll_server_port){
+        _listensock_ptr = std::make_shared<TcpSocket>();
+    }
+
+    ~EpollServer(){ _listensock_ptr->socket_close_();}
+
+    void epoll_server_init_()
+    {
+        _listensock_ptr->socket_create_();
+        _listensock_ptr->socket_bind_(_epoll_server_port);
+        _listensock_ptr->socket_reuse_port_address_();
+        _listensock_ptr->socket_listen_();
+    }
+
+    void epoll_server_statrt()
+    {
+        for(;;)
+        {
+            
+        }
+    }
+
+    private:
+    std::shared_ptr<TcpSocket> _listensock_ptr;
+    std::shared_ptr<Epoller> _epoll_ptr;
+    uint16_t _epoll_server_port;
+    wind::Log &_log = wind::Log::getInstance();
+};
+````
+
+这里我们用的都是智能指针, 这是因为后面我们写的`reactor`会有很多指针互指操作, 所以这里全用智能指针进行过度.
+
+然后我们先关心一下等待, 监听套接字等会再放进epoll模型, 我们让调用方操心异常处理, 和缓冲区控制
+
+```cpp
+int epoll_wait_(struct epoll_event events[], int maxevents, int timeout = default_timeout)
+{
+    return ::epoll_wait(_epoll_fd, events, maxevents, timeout);
+}
+```
+
+这样上一层, 也就是`epoll_server`那一层就需要准备一个事件缓冲区, 这个缓冲区设置成多大呢? 其实多大都可以, 因为即使就绪事件数目较多, 大于我们的缓冲区大小, 那也不用担心, 因为就绪队列仍存储着这些就绪事件, 我们只要下一次再把它们收上来就行了, 这里我们就定为64.
+
+```cpp
+static const int default_max_events = 64;
+
+for(;;)
+{
+    int n = _epoll_ptr->epoll_wait_(_events, default_max_events);
+}
+
+struct epoll_event _events[default_max_events];
+```
+
+接下来我们对返回值进行判断.
+
+```cpp
+for(;;)
+{
+    int n = _epoll_ptr->epoll_wait_(_events, default_max_events);
+    if(n > 0)   epoll_server_dispatch_event(n);
+    else if(n == 0) _log(Info, "epoll 超时...");
+    else _log(Warning, "epoll_wait 发生了错误:%s", strerror(errno));
+}
+```
+
+有就绪事件, 那就进行事件分配, 参数`n`表示有效事件的个数.
+
+现在我们回过头去, 把监听套接字加入`epoll`模型的红黑树中. 由于事件的种类比较多, 再加上它们实际上是位图, 可以以按位与的方式同时关心多个事件, 所以我们仍旧沿用系统的比特位传参方式, 不对其进行功能上的拆分.
+
+```cpp
+struct epoll_event {
+    uint32_t      events;  /* Epoll events */
+    epoll_data_t  data;    /* User data variable */
+};
+
+union epoll_data {
+    void     *ptr;
+    int       fd;
+    uint32_t  u32;
+    uint64_t  u64;
+};
+```
+
+- EPOLLIN : 表示对应的文件描述符可以读 (包括对端SOCKET正常关闭);  
+- EPOLLOUT : 表示对应的文件描述符可以写;  
+- EPOLLPRI : 表示对应的文件描述符有紧急的数据可读 (这里应该表示有带外数据到来);  
+- EPOLLERR : 表示对应的文件描述符发生错误;  
+- EPOLLHUP : 表示对应的文件描述符被挂断;  
+- EPOLLET : 将EPOLL设为边缘触发(Edge Triggered)模式, 这是相对于水平触发(Level Triggered)来说的  
+- EPOLLONESHOT：只监听一次事件, 当监听完这次事件之后, 如果还需要继续监听这个socket的话, 需要再次把这个socket加入到EPOLL队列里.  
+
+下面我们就来写`epoller`的`ctl`接口, 由于`epoll_ctl`的`op`只有三种, 所以我们可以对其进行功能上的拆分, 拆成添加, 修改, 删除这三个子接口
+
+```cpp
+void epoll_add_(int fd, uint32_t event)
+{
+    struct epoll_event ev;
+    ev.events = event;
+    ev.data.fd = fd;
+
+    int n = ::epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd, &ev);
+
+    if(n < 0)
+        _log(Error, "epoll_ctl(ADD) 出错:%s", strerror(errno));
+}
+
+void epoll_mod_(int fd, uint32_t event)
+{
+    struct epoll_event ev;
+    ev.events = event;
+    ev.data.fd = fd;
+
+    int n =  ::epoll_ctl(_epoll_fd, EPOLL_CTL_MOD, fd, &ev);
+
+    if(n < 0)
+        _log(Error, "epoll_ctl(MOD) 出错:%s", strerror(errno));
+}
+
+void epoll_del_(int fd)
+{
+    int n =  ::epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, fd, nullptr);
+
+    if(n < 0)
+        _log(Error, "epoll_ctl(DEL) 出错:%s", strerror(errno));
+}
+```
+
+由于这个`epoll`是完全的实验性质的, 在逻辑上实际上根本不能满足网络要求, 所以我们现在就默认只处理`EPOLLIN `, 下面回到`epoll_server`把监听套接字插入红黑树.
+
+```cpp
+static const uint32_t EPOLL_IN = EPOLLIN;
+
+void epoll_server_statrt()
+{
+    _epoll_ptr->epoll_add_(_listensock_ptr->socket_fd_(), EPOLL_IN);
+    for(;;)
+    {
+        int n = _epoll_ptr->epoll_wait_(_events, default_max_events);
+        if(n > 0)   epoll_server_dispatch_event(n);
+        else if(n == 0) _log(Info, "epoll 超时...");
+        else _log(Warning, "epoll_wait 发生了错误:%s", strerror(errno));
+    }
+}
+```
+
+为什么要特别写一个`EPOLL_IN`, 而不直接使用`EPOLLIN`? 因为这个`EPOLL_IN`后面是要改动的, 这样写方便日后只改这一处.
+
+下面我们写事件派发器
+
+```cpp
+void epoll_server_dispatch_event(int events)
+{
+    for(int i = 0; i < events; ++i)
+    {
+        int fd = _events[i].data.fd;
+        uint32_t event = _events[i].events;
+        if(event & EPOLL_IN)
+        {
+            if(fd == _listensock_ptr->socket_fd_()) accept_();
+            else response_(fd);
+        }
+        else if(event & EPOLL_OUT)
+        {
+
+        }
+        else
+        {
+
+        }
+    }
+}
+
+```
+
+前面说过, 我们现在只关心`EPOLL_IN`
+
+```cpp
+void accept_()
+{
+    std::string clientip;
+    uint16_t clientport;
+    int sock = _listensock_ptr->socket_accept_(&clientip, &clientport);
+    if(sock < 0) _log(Warning, "不完整的三次握手:%s", strerror(errno));
+    else
+    {
+        // 多路转接服务器只会读写确认就绪的文件
+        _log(Info, "获取一个客户端连接, ip:%s, port:%d", clientip.c_str(), clientport);
+        _epoll_ptr->epoll_add_(sock, EPOLL_IN);
+    }
+}
+```
+
+当收到一个连接时, 一定要把它注册到`epoll`的红黑树里面, 这样它下次发送消息, 才能出现到就绪队列中.
+
+```cpp
+void response_(int fd)
+    {
+        _log(Info, "📩 收到一个新的消息，来自 fd = %d", fd);
+
+        char buff[128] = {0};
+        int n = read(fd, buff, sizeof(buff) - 1);
+
+        if (n > 0)
+        {
+            buff[n] = '\0';
+            std::cout << "🗣️  用户(fd=" << fd << ") 说：\n";
+            std::cout << "    \"" << buff << "\"" << std::endl;
+        }
+        else if (n == 0)
+        {
+            _log(Warning, "👋 用户(fd = %d) 断开了连接", fd);
+            // 关文件之前在epoll那里注销关心事件
+            _epoll_ptr->epoll_del_(fd);
+            close(fd);
+        }
+        else
+        {
+            _log(Warning, "❌ 读取数据时发生错误(fd = %d)", fd);
+            _epoll_ptr->epoll_del_(fd);
+            close(fd);
+        }
+    }
+
+```
+
+这段响应, 其实是有很致命性的逻辑问题, 那就是无法解决面向字节流的粘包问题, 但这里我们只是实验性质, 所以就这样写了, 另外, 正如收到连接要把文件注册到`epoll`中, 关闭前(被注销的文件一定要是合法的, 所以是close前del)也一定要把`epoll`中的`fd`注销, 否则`wait`会出错.   这份打印代码是在`poll::session`里面改出来的, 打印风格是AI写的.
+
+```shell
+[wind@starry-sky build]$ ./epollserver 
+[Info][2025-5-4 20:50:44]::epoll 超时...
+[Info][2025-5-4 20:50:47]::epoll 超时...
+[Info][2025-5-4 20:50:47]::获取一个客户端连接, ip:127.0.0.1, port:40368
+[Info][2025-5-4 20:50:49]::📩 收到一个新的消息，来自 fd = 6
+🗣️  用户(fd=6) 说：
+    "scvsdv
+"
+[Info][2025-5-4 20:50:52]::epoll 超时...
+[Info][2025-5-4 20:50:55]::epoll 超时...
+[Info][2025-5-4 20:50:58]::epoll 超时...
+[Info][2025-5-4 20:51:1]::epoll 超时...
+[Info][2025-5-4 20:51:4]::epoll 超时...
+[Info][2025-5-4 20:51:7]::epoll 超时...
+[Info][2025-5-4 20:51:10]::epoll 超时...
+[Info][2025-5-4 20:51:13]::epoll 超时...
+[Info][2025-5-4 20:51:15]::获取一个客户端连接, ip:175.24.175.224, port:59782
+[Info][2025-5-4 20:51:17]::📩 收到一个新的消息，来自 fd = 7
+🗣️  用户(fd=7) 说：
+    "ccdscds
+"
+[Info][2025-5-4 20:51:20]::epoll 超时...
+[Info][2025-5-4 20:51:23]::epoll 超时...
+[Info][2025-5-4 20:51:26]::epoll 超时...
+[Info][2025-5-4 20:51:27]::获取一个客户端连接, ip:112.26.31.132, port:53521
+[Info][2025-5-4 20:51:29]::📩 收到一个新的消息，来自 fd = 8
+🗣️  用户(fd=8) 说：
+    "ca"
+[Info][2025-5-4 20:51:29]::📩 收到一个新的消息，来自 fd = 8
+🗣️  用户(fd=8) 说：
+    "c"
+[Info][2025-5-4 20:51:32]::epoll 超时...
+[Info][2025-5-4 20:51:32]::📩 收到一个新的消息，来自 fd = 8
+[Warning][2025-5-4 20:51:32]::👋 用户(fd = 8) 断开了连接
+[Info][2025-5-4 20:51:35]::epoll 超时...
+[Info][2025-5-4 20:51:38]::epoll 超时...
+[Info][2025-5-4 20:51:40]::📩 收到一个新的消息，来自 fd = 7
+[Warning][2025-5-4 20:51:40]::👋 用户(fd = 7) 断开了连接
+[Info][2025-5-4 20:51:43]::epoll 超时...
+[Info][2025-5-4 20:51:43]::📩 收到一个新的消息，来自 fd = 6
+[Warning][2025-5-4 20:51:43]::👋 用户(fd = 6) 断开了连接
+^C
+[wind@starry-sky build]$ 
+```
+
+为什么说`response_`有问题呢? 因为发过来的数据大概率不是一个完整的应用层报文, 而是半个, 或者多个, 反正有的报文并不完整. 但身为多路转接服务器, 我一定不能在这里等, 因为我一等服务端就整个阻塞了, 所以我只有等待这个客户端下一次再发数据, 结合当前已有的残缺报文, 拼出一个完整的报文, 但我们这里的`buff`可是栈上对象, 下一次来, 里面的数据就丢失了, 所以无法满足实际性需求.
+
+-------------------
+
+下面我们说说`epoll`的两种工作模式. 水平触发(LT), 边缘触发(ET).
+
+`epoll` 默认采用的是 LT(Level Triggered，水平触发)模式，`select` 和 `poll` 也是基于这种模式。LT 模式是状态驱动的，只要文件描述符处于就绪状态，它就会一直出现在就绪队列中。
+
+例如，在读操作中，如果某次 `epoll_wait` 返回了就绪的 fd `a`，但你没有读，或者没有读完它的缓冲区数据，那么下一次调用 `epoll_wait` 时，它仍会出现在就绪队列中，你仍可以再次收到 `a` 并继续读数据。
+
+而ET(Edge Triggered，边沿触发) 模式是事件驱动的，它只会在文件描述符的状态发生“边沿变化”时（例如从不可读变成可读）才通知一次。换句话说，只有写端写入新数据时，fd 才会出现在就绪队列中。
+
+如果你第一次从 `epoll_wait` 拿到了 `a`，但没有处理它，等到下一次 `epoll_wait`，由于没有新的数据写入（也就是没有新的“边沿”），fd `a` 就不会再出现了。这意味着你将“错过”这次读取机会，除非写端再次写入数据，触发新的“边沿事件”。
+
+这个"边缘触发"和"水平触发"是嵌入式或者单片机板子那边的概念, 水平触发就是端口(硬件的端口)是高电平那就一直有效, 边缘触发是给个上升沿才能有效.
+
+epoll 的 LT 模式就像快递被放在驿站的货架上, 你今天不取, 明天也不取, 快递还是在那里等着你, 每次你去驿站, 工作人员都会告诉你它还在; 而 ET 模式更像快递员上门送货, 敲一次门你没开就走了, 不会第二次提醒你, 除非快递公司再次发货再来一次. 所以 LT 是状态驱动的, 只要快递还在, 就会持续通知你; 而 ET 是事件驱动的, 只有状态发生变化的那一瞬间才通知你一次, 错过了就没有了.
+
+直觉上来说, ET 模式的效率高于 LT, 因为 ET 只在事件发生的那一刻通知一次, 其他时候不再打扰你, 这意味着内核可以处理更多其他事件, 不必反复提醒同一个就绪状态. 不过 ET 的代价是它具有一定的强制性, 要求你一次性把数据读干净, 否则你可能永远也收不到再次通知, 相比之下 LT 就宽松得多. 我们接下来要写的 reactor 就是基于 ET 的, 不过也不需要担心, 它的复杂性是渐进的, 并不是突然变难. 另外也要说明, 上面这些只是从直觉上的角度出发, 实际上如果 LT 控制得当, 比如及时读取数据, 也能接近 ET 的性能. 还有一点很重要的是, ET 模式由于强迫应用层读取更多数据, 会让 TCP 窗口快速释放, 使得对方可以发来更多内容, 从网络传输层面看, 这也是一种性能提升.
+
+在采用 ET（边缘触发）模式时，内核只在文件描述符状态“发生变化”的那个时刻，将它加入 epoll 的就绪队列，并在应用层调用 epoll_wait 时返回（即事件被内核写入 epoll 文件所对应的缓冲区，供应用层读取，完成“返回”）。这种触发方式只会通知一次，如果你在收到这个通知(通知是你把事件收到应用层)后，没有把该文件描述符上的数据全部处理完，那么剩下的部分虽然还在内核缓冲区中，内核也不会再次发出提醒。也就是说，对于已经收上来的文件描述符，你要在应用层尽最大努力把它的内容一次性读完或写完，直到系统调用返回 EWOULDBLOCK，说明内核中暂时已经没有可处理的数据了。下次是否还能再次获得该文件描述符的通知，取决于它是否再次发生了新的“状态变化”（比如新的数据到达）。
+
+ET 的核心不是“你必须一次性把所有就绪队列里的事件都读出来”，而是：对你已经读上来的 fd，要把它的内核缓冲区清空，否则你将错失那部分数据。为了安全地完成这一行为，fd 必须设置为非阻塞模式，这样你才能在数据读完之后，通过 errno 是 EWOULDBLOCK 判断“彻底读干净了”，而不是因为阻塞而卡住进程。同时，注册到 epoll 时要或上 EPOLLET，以告知内核你使用的是边缘触发方式，已经准备好进行非阻塞处理。
+
+不过这时又引出了一个新的问题。由于 TCP 是面向字节流的协议，不保证消息边界，所以在一次读操作中，读到的数据可能正好是几个完整的报文，也可能只是一部分报文，尤其是最后一个报文，很可能是不完整的残片。为了应对这种情况，我们需要将它暂存在应用层缓冲区中。与此同时，还要考虑到服务端要同时处理大量的连接，每个连接都可能存在自己的残留数据，这就要求我们为每一个文件描述符建立一个对应的缓冲区，并通过某种映射结构（例如哈希表）将它们有序地管理起来。只有这样，我们才能在 ET 模式下，把内核一次性送上来的原始字节流，分批、有序地还原成完整的报文，从而正确地驱动上层逻辑。
+
+### Reactor 
+
+Reactor 模型正是为了解决这些问题而诞生的：它不仅提供了一种高效管理海量连接的方法，还为处理复杂的字节流、解析协议、组织逻辑提供了清晰的框架。至此，我们的讨论也就达到了一个阶段性的终点。接下来，我们将在 Reactor 框架中亲手编写一个真正完整、真正具备服务能力的网络程序——它不仅能处理并发连接，还将具备清晰的层次划分，模拟出一套结构完备的七层协议栈，从网络传输到应用语义，一步步落地。
+
+--------------
+
+很久以前，有一位工程师在维护一台高负载的服务器。这台服务器每天要应对成千上万的请求，像极了一座小型工厂。起初，他用的模型就像流水线：每来一个请求，就派一个工人（线程）去处理。然而，工人太多，光是调度他们就成了一种负担，反而效率越来越低。
+
+这时，他想起了核反应堆的工作原理：不是靠成百上千个原子一个个撞来撞去，而是通过一个控制器统一调度、在合适的时机释放能量。他便以此为灵感，设计出一个“控制中心”，用一个事件分发器来监听所有输入，只在“有反应”（事件就绪）的时候，“引爆反应”（调用处理器），从而高效驱动整个系统。
+
+于是，这个设计模式被他戏称为 Reactor，中文就叫 反应堆模式：不主动干预，只在必要时刻反应，并快速处理，像极了一座井然有序、威力巨大的反应堆。
+
+--------------
+
+
 
 # 完 

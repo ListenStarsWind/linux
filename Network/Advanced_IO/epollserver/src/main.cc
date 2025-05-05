@@ -7,7 +7,7 @@ using namespace std;
 int main()
 {
     unique_ptr<EpollServer> epoll_svr(new EpollServer());
-    epoll_svr->init();
-    epoll_svr->statrt();
+    epoll_svr->epoll_server_init_();
+    epoll_svr->epoll_server_statrt();
     return 0;
 }

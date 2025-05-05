@@ -26,22 +26,20 @@ enum socket_errno
     ACCECT_ERROR = 4
 };
 
-using namespace wind;
-
 class TcpSocket
 {
 public:
     TcpSocket() {}
     ~TcpSocket()
     {
-        if (_sockfd > 0)
+        if (_tcp_sockfd > 0)
             socket_close_();
     }
 
     void socket_create_()
     {
-        _sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (_sockfd < 0)
+        _tcp_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (_tcp_sockfd < 0)
         {
             _log(Fatal, "socket create error: %s", strerror(errno));
             exit(CREATE_ERROR);
@@ -55,7 +53,7 @@ public:
         sock_in.sin_family = AF_INET;
         sock_in.sin_port = htons(port);
         sock_in.sin_addr.s_addr = INADDR_ANY;
-        if (bind(_sockfd, reinterpret_cast<const struct sockaddr *>(&sock_in), static_cast<socklen_t>(sizeof(sock_in))) != 0)
+        if (bind(_tcp_sockfd, reinterpret_cast<const struct sockaddr *>(&sock_in), static_cast<socklen_t>(sizeof(sock_in))) != 0)
         {
             _log(Fatal, "bind error: %s", strerror(errno));
             exit(BIND_ERROR);
@@ -64,7 +62,7 @@ public:
 
     void socket_listen_()
     {
-        if (listen(_sockfd, default_backlog) != 0)
+        if (listen(_tcp_sockfd, default_backlog) != 0)
         {
             _log(Fatal, "listen error: %s", strerror(errno));
             exit(LISTEN_ERROR);
@@ -82,7 +80,7 @@ public:
             _log(Fatal, "connect error: %s", strerror(errno));
             exit(ACCECT_ERROR);
         }
-        if (connect(_sockfd, reinterpret_cast<const struct sockaddr *>(&sock_in), static_cast<socklen_t>(sizeof(sock_in))) != 0)
+        if (connect(_tcp_sockfd, reinterpret_cast<const struct sockaddr *>(&sock_in), static_cast<socklen_t>(sizeof(sock_in))) != 0)
         {
             _log(Fatal, "connect error: %s", strerror(errno));
             exit(ACCECT_ERROR);
@@ -93,7 +91,7 @@ public:
     {
         struct sockaddr_in sock_in;
         socklen_t len = static_cast<socklen_t>(sizeof(sock_in));
-        int fd = accept(_sockfd, reinterpret_cast<struct sockaddr *>(&sock_in), &len);
+        int fd = accept(_tcp_sockfd, reinterpret_cast<struct sockaddr *>(&sock_in), &len);
         if (fd < 0)
         {
             _log(Warning, "accept error: ", strerror(errno));
@@ -106,10 +104,10 @@ public:
         return fd;
     }
 
-    void socket_reuse_port_address()
+    void socket_reuse_port_address_()
     {
         int opt = 1;
-        if (setsockopt(_sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
+        if (setsockopt(_tcp_sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) == -1)
         {
             _log(Warning, "set socket error: %s", strerror(errno));
         }
@@ -117,18 +115,23 @@ public:
 
     operator int()
     {
-        return _sockfd;
+        return _tcp_sockfd;
+    }
+
+    int socket_fd_()
+    {
+        return *this;
     }
 
     void socket_close_()
     {
-        close(_sockfd);
-        _sockfd = -1;
+        close(_tcp_sockfd);
+        _tcp_sockfd = -1;
     }
 
 private:
-    int _sockfd;
-    Log &_log = Log::getInstance();
+    int _tcp_sockfd;
+    wind::Log &_log = wind::Log::getInstance();
 };
 
 
