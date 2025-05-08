@@ -46,15 +46,17 @@ public:
 private:
   int _sock;
 
+public:
   std::weak_ptr<TcpServer> _tcp_server_ptr;
 
-public:
   std::string _ip;
   uint16_t _port;
 
-  Buffer _inbuffer; // 缓冲区不应该用string, 那样读不了二进制文件,
-                    // 因为二进制文件里可能会有很多\0, 这样就会被视为终止符
-  Buffer _outbuffer;
+  std::string
+      _inbuffer; // 缓冲区不应该用string, 那样读不了二进制文件,
+                 // 因为二进制文件里可能会有很多\0, 这样就会被视为终止符,
+                 // 但为了方便起见, 这里依旧使用string
+  std::string _outbuffer;
 
 public:
   // 专门给TcpServer检测有效性而暴露的接口
@@ -175,8 +177,8 @@ public:
       ssize_t n =
           recv(sock, buff, sizeof(buff), 0); // flags 0不进行任何标记位设置
       if (n > 0) {
-        me->_inbuffer.append(buff, n);
-        _log(Debug, "%s", me->_inbuffer.data());
+        me->_inbuffer += buff;
+        _log(Debug, "%s", me->_inbuffer.c_str());
 
       } else if (n == 0) {
         _log(Info, "用户(%d)<%s:%d>退出了连接...", sock, me->_ip.c_str(),
@@ -184,6 +186,7 @@ public:
 
         // 回调异常处理逻辑
         me->_except_cb(me);
+        return;
 
       } else {
         // 出错了
@@ -200,6 +203,7 @@ public:
           _log(Warning, "用户(%d)<%s:%d>连接出错", sock, me->_ip.c_str(),
                me->_port);
           me->_except_cb(me);
+          return;
         }
       }
     }
@@ -211,6 +215,45 @@ public:
 
   void Sender(std::weak_ptr<Connection> connection) {
     std::shared_ptr<Connection> me = connection.lock();
+
+    while (true) {
+      ssize_t n =
+          send(me->sock_fd(), me->_outbuffer.c_str(), me->_outbuffer.size(), 0);
+      if (n > 0) {
+        me->_outbuffer.erase(0, n);
+
+        // 发完了, 出去
+        if (me->_outbuffer.empty())
+          break;
+      } else if (n == 0) {
+        return;
+      } else {
+        if (errno == EWOULDBLOCK) {
+          break;
+        } else if (errno == EINTR) {
+          continue;
+        } else {
+          _log(Warning, "连接<%s:%d>发送失败: %s", me->_ip.c_str(), me->_port,
+               strerror(errno));
+          me->_except_cb(me);
+          return;
+        }
+      }
+
+      if (me->_outbuffer.empty()) {
+        // 发完了, 为了避免写关心引发效率问题, 取消写关心
+        AdjustEventMask(me->sock_fd(), true, false);
+      } else {
+        // 没发完, 如果传输层缓冲区又能写了, 那我就触发事件, 继续来写.
+        AdjustEventMask(me->sock_fd(), true, true);
+      }
+    }
+  }
+
+  void AdjustEventMask(int sockfd, bool wantRead, bool wantWrite) {
+    uint32_t event = 0;
+    event |= ((wantRead ? EPOLLIN : 0) | (wantWrite ? EPOLLOUT : 0) | EPOLLET);
+    _epoll_ptr->epoll_mod_(sockfd, event);
   }
 
   void Excepter(std::weak_ptr<Connection> connection) {
@@ -218,6 +261,16 @@ public:
 
     _log(Warning, "用户(%d)<%s:%d>连接关闭", me->sock_fd(), me->_ip.c_str(),
          me->_port);
+
+    // 将连接从epoll中去除
+    _epoll_ptr->epoll_del_(me->sock_fd());
+    // AdjustEventMask(me->sock_fd(), false, false);
+
+    // 将其从_connections中去除
+    _connections.erase(me->sock_fd());
+
+    // 关闭文件   或者将文件生命周期交由connection
+    close(me->sock_fd());
   }
 
   // loop比start更合适,loop常用来表示不断循环的逻辑
@@ -236,7 +289,7 @@ public:
     while (_running) {
 
       dispatch(default_timeout);
-    //   PrintConnection();
+      //   PrintConnection();
     }
   }
 
@@ -296,6 +349,7 @@ public:
   //   std::cout << std::endl<<std::endl;
   // }
 
+  // 为兼容以往代码, 已将缓冲区改为string, 以下注释失效
   // 不安全, _inbuffer不一定是字符串化的
   void PrintConnection() {
     std::cout << "当前活跃连接：" << std::endl;
@@ -309,7 +363,7 @@ public:
       std::cout << "fd        : " << e.first << std::endl;
       std::cout << "地址      : " << conn->_ip << ":" << conn->_port
                 << std::endl;
-      std::cout << "接收数据  : " << conn->_inbuffer.data() << std::endl;
+      std::cout << "接收数据  : " << conn->_inbuffer.c_str() << std::endl;
     }
     std::cout << "========================================" << std::endl
               << std::endl;
