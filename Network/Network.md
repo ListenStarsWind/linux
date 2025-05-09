@@ -11769,6 +11769,1390 @@ Reactor 模型正是为了解决这些问题而诞生的：它不仅提供了一
 
 --------------
 
+下面我们来写代码
 
+我们先把项目框架搭一下, 该拷贝的拷贝, 该新建的新建.  我们使用`cmake`来构建项目
+
+```shell
+[whisper@starry-sky LoopServer]$ tree .
+.
+├── bulid
+├── CMakeLists.txt
+├── include
+│   ├── Epoller.hpp
+│   ├── log.hpp
+│   ├── LoopServer.hpp
+│   ├── NonCopy.hpp
+│   └── TcpSocket.hpp
+└── src
+    ├── LoopClient.cc
+    └── LoopServer.cc
+
+4 directories, 8 files
+[whisper@starry-sky LoopServer]$ 
+```
+
+为什么这个项目叫做"LoopServer"? "Loop"实际上就是循环的意思, 很明显, 我们的服务器是要不断循环的, 所以我们叫做"Loop", `cmake`是一个跨平台的项目管理器, 在Linux下, 它可以生成`makefile`文件供我们直接`make`
+
+```cmake
+# 需要的最低版本的cmake
+cmake_minimum_required(VERSION 3.10)
+
+# 设置项目名
+project(LoopServer)
+
+# 设置 C++ 标准
+set(CMAKE_CXX_STANDARD 11)
+
+# 包含头文件
+include_directories(include)
+include_directories(/usr/include/jsoncpp)
+
+# 添加可执行文件
+add_executable(reactor_server src/LoopServer.cc)
+add_executable(reactor_client src/LoopClient.cc)
+
+# 链接 jsoncpp 库
+# 协议层使用json
+target_link_libraries(reactor_server PRIVATE jsoncpp)
+target_link_libraries(reactor_client PRIVATE jsoncpp)
+
+# 生成 compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+```
+
+这里我只说一下最后一个, 也就是`set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, 它表示生成一个`clangd`引导文件, 因为我是用clangd这个插件进行语法分析的, 为了让它找到项目中的头文件, 我们需要再让`cmake`生成一个引导文件供`clangd`识别.
+
+其实这个项目就是在写`Reactor`服务器框架, 所以你把项目名换成`Reactor`也是完全可以的.
+
+首先, 很明显, 我们的服务器会有很多连接, 每个连接都应该有自己的应用层接收发送缓冲区, 所以我们先要写一个连接类, 用来描述一个连接
+
+```cpp
+#include<string>
+#include<functional>
+#include<memory>
+
+class Connection;
+class LoopServer;
+
+using func_t = std::function<void(std::weak_ptr<Connection>)>;
+
+struct Connection{
+
+    int _sock;
+    std::string _inbuff;
+    std::string _outbuff;
+
+    func_t _recv_cb;
+    func_t _send_cb;
+    func_t _except_cb;
+
+    std::weak_ptr<LoopServer> _server_ptr;
+};
+
+class LoopServer{
+
+};
+```
+
+先说一下我这里为什么把连接类写成`struct`, 其实原因很简单, 那就是我这里为了图个方便, 不想再专门写外露接口, 所以直接就用`struct`, 把成员全部公开, 第一个成员`_sock`, 想必不用多说, 就是连接对应的文件描述符, 下面的两个`string`, 相信重名字上也能看出来, 它们就是我们应用层的接收缓冲区和发送缓冲区, 需要特别说明的是, 缓冲区其实不能用`string`, 因为缓冲区里面有时候是二进制数据, 二进制数据里面很可能会有多个`\0`, 此时就会导致出错, 实际上应该用一个`vector<char>`做缓冲区, 但还是为了方便, 因为`vector<char>`需要再专门写一下缓冲区类, 所以还是为了省事, 就不写了.
+
+接着我们需要强调的是, 我们的服务器是分层的, 所以对于哪一层要做什么, 不做什么, 都要有明确的划分, 我们可以看到, 下面三个是回调对象, 分别对应着连接的读方法, 写方法, 异常方法, 这些方法都涉及到具体的IO过程, 因此是`LoopServer`该做的事, 而不应该由`Connection`来做, 以后, 我们会把`LoopServer`中的方法赋到这三个回调对象, 便于对不同的连接进行不同的(倒也不是特别不同)的读写异常方法, 另外, 我们可以看到, 这个调用对象的参数是`weak_ptr<Connection>`, 这是因为这三个回调函数的具体执行时间也和具体的IO场景有关, 所以需要由`LoopServer`来进行决定, 但`LoopServer`里面有很多的连接, 它怎么分得清谁是谁呢? 那就是依靠`weak_ptr<Connection>`这个参数来进行分辨的, 这里最好用`weak_ptr`, 因为`weak_ptr`相当于只有对象的查看权, 但没有使用权, 或者更底层的说, 它不会让底层的引用计数加一, 我们想让连接的生命周期交由`LoopServer`管理, 所以我们不希望, 别的组件长时间拥有这个引用计数.   至于`_server_ptr`, 也很简单, 就是让连接能找到自己的服务器.
+
+下面我们要让`LoopServer`继承一些东西
+
+```cpp
+class LoopServer : public std::enable_shared_from_this<LoopServer> , public NonCopy
+{
+
+};
+```
+
+这里主要想说的是`enable_shared_from_this`, 就目前这个实验性质的项目来说, `NonPocy`你加不加都行, 但`enable_shared_from_this`是一定要继承的, 而且必须是`public`继承方式, 继承它的原因是因为我们的连接对象, 也就是`struct Connection`的声明周期是由`LoopServer`进行管理的, 也就是说, `struct Connection`对象将由`LoopServer`实例化和释放, 实例化的时候就需要对其中的成员进行初始化, 其中就包括`_server_ptr`, 但对于`weak_ptr`来说, 它只能由`shared_ptr`进行初始化, 这个继承的目的就是让`LoopServer`对象拿到自己的`shared_ptr`对象, 遇到具体场景我们再说.
+
+```cpp
+class LoopServer : public std::enable_shared_from_this<LoopServer>,
+                   public NonCopy {
+
+  LoopServer(uint16_t port)
+      : _port(port), _epoll_ptr(new Epoller()), _listen_ptr(new TcpSocket()) {}
+
+public:
+  static std::shared_ptr<LoopServer> create(uint16_t port) {
+    return std::shared_ptr<LoopServer>(new LoopServer(port));
+  }
+
+private:
+  uint16_t _port;
+  std::shared_ptr<Epoller> _epoll_ptr;
+  wind::Log &_log = wind::Log::getInstance();
+  std::shared_ptr<TcpSocket> _listen_ptr;
+  std::unordered_map<int, std::shared_ptr<Connection>> _connections;
+};
+```
+
+我们暂且先写这么多, `_port`不用多说, 服务器的端口号, `_epll_ptr`指向一个`Epoller`对象, 让我们能够进行多路转接, `_log`用的是单例模式, 这个`log`写的不太好, 它里面多开了一个文件, 但现在已经没有时间改了, 所以就这样用, `_listen_ptr`当然是为我们创建一个监听套接字, `_connections`是用来进行连接查询的.
+
+我们的构造函数不能暴露出去, 因为获得自己`shared_ptr`的另一个条件就是自己必须是以`shared_ptr`形式构造的, 所以我们需要专门设计一个`create`来构造对象. 析构不写了, 因为用的是智能指针, 所以生命周期都由它们进行管理.
+
+```cpp
+void init()
+{
+    _listen_ptr->socket_listen_();
+    _listen_ptr->socket_reuse_port_address_();
+    _listen_ptr->socket_bind_(_port);
+    _listen_ptr->socket_listen_();
+}
+
+void loop()
+{
+
+}
+
+
+// LoopServer.cc
+#include"LoopServer.hpp"
+
+static const uint16_t default_port = 8888;
+
+int main()
+{
+    std::shared_ptr<LoopServer> server = LoopServer::create(default_port);
+    server->init();
+    server->loop();
+    return 0;
+}
+```
+
+下面我们就`cmake`一下
+
+```shell
+[whisper@starry-sky LoopServer]$ cd bulid/
+[whisper@starry-sky bulid]$ cmake -S . -B . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+CMake Warning:
+  Ignoring extra path from command line:
+
+   "/home/whisper/linux-study/Network/Advanced_IO/LoopServer/bulid"
+
+
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/whisper/linux-study/Network/Advanced_IO/LoopServer/bulid
+[whisper@starry-sky bulid]$ cd ..
+[whisper@starry-sky LoopServer]$ ln -sf bulid/compile_commands.json .
+[whisper@starry-sky LoopServer]$ cd bulid/
+[whisper@starry-sky bulid]$ make
+[ 50%] Built target reactor_server
+[ 75%] Building CXX object CMakeFiles/reactor_client.dir/src/LoopClient.cc.o
+[100%] Linking CXX executable reactor_client
+[100%] Built target reactor_client
+[whisper@starry-sky bulid]$ ls
+CMakeCache.txt  CMakeFiles  cmake_install.cmake  compile_commands.json  Makefile  reactor_client  reactor_server
+[whisper@starry-sky bulid]$ 
+```
+
+为了能编过`reactor_client`实际上是空的.
+
+`cmake -S . -B . -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..`生成包括`clangd`引导文件的项目, `ln -sf bulid/compile_commands.json .`在项目根目录下建立软链接, 让`clangd`更好找.
+
+下面我们就要写`loop`了, 为了让服务器以`ET`模式工作, 我们需要把关心的事件全部再或上一个`EPOLLET`
+
+```cpp
+static const uint32_t EVENT_IN = EPOLLIN | EPOLLET;
+static const uint32_t EVENT_OUT = EPOLLOUT | EPOLLET;
+```
+
+接下来为了支持`ET`, 我们需要把所有连接都设置成非阻塞, 如果不能设置, 就会使得服务器卡死, 是很致命的错误, 所以设置不成功就直接退出
+
+```cpp
+void SetNonBlock(int fd) {
+    int f = fcntl(fd, F_GETFL);
+    if (f < 0) {
+        _log(Fatal, "文件(%d)阻塞状态获取失败:%s", strerror(errno));
+        exit(1);
+    }
+
+    int r = fcntl(fd, F_SETFL, f | O_NONBLOCK);
+    if (r < 0) {
+        _log(Fatal, "文件(%d)阻塞状态设置失败:%s", strerror(errno));
+        exit(1);
+    }
+}
+```
+
+监听套接字自然也需要非阻塞
+
+```cpp
+void init() {
+    _listen_ptr->socket_create_();
+    SetNonBlock(_listen_ptr->socket_fd_());
+    _listen_ptr->socket_reuse_port_address_();
+    _listen_ptr->socket_bind_(_port);
+    _listen_ptr->socket_listen_();
+}
+```
+
+对于每一个连接, 我们都需要将其注册进服务器, 监听套接字也不例外.
+
+```cpp
+Connection(int sock, std::weak_ptr<LoopServer> server_ptr) :_sock(sock) , _server_ptr(server_ptr){}
+
+
+void registerConnection(int sock, uint32_t event, func_t recv_cb = nullptr, func_t send_cb = nullptr, func_t except_cb = nullptr)
+{
+    // 注册一个连接分为两步
+
+
+    // 1. 将连接交付给_connections统一调度
+    // 获取自身(LoopServer)的shared_ptr
+    auto me = shared_from_this();
+    std::shared_ptr<Connection> connection = std::make_shared<Connection>(sock, me);
+    connection->_recv_cb = recv_cb;
+    connection->_send_vb = send_cb;
+    connection->_except_cb = except_cb;
+    _connections.emplace(sock, connection);
+
+
+    // 2. 将连接添加到epoll对象中
+    _epoll_ptr->epoll_add_(sock, event);
+
+    _log(Debug, "成功注册文件: %d", sock);
+}
+```
+
+特别要注意, 不能用`shared_ptr<LoopServer>(this)`的方式获取自身的`shared_ptr`, 这样相当于又构造了一个`shared_ptr`, 用的不是`main`里面`shared_ptr`的引用计数, 所以可能会造成重复析构的问题. `weak_ptr`只能由`shared_ptr`实例化.
+
+我们再引入一个布尔变量表示, 服务器是不是在`loop`
+
+```cpp
+void loop() {
+    _running = true;
+
+    // 等监听套接字的读方法写了之后再传读方法
+    registerConnection(_listen_ptr->socket_fd_(), EPOLLIN);
+
+    while(_running)
+    {
+
+    }
+}
+```
+
+为了能把`epoll`就绪队列中的就绪事件收上来, 我们需要维护一个对应的缓冲区, 另外也需要准备一下`timeout`
+
+```cpp
+static const int MAXEVENTS = 64;
+static const int TIMEOUT = 3000;
+
+private:
+bool _running;
+uint16_t _port;
+struct epoll_event _reads[MAXEVENTS];
+std::shared_ptr<Epoller> _epoll_ptr;
+wind::Log &_log = wind::Log::getInstance();
+std::shared_ptr<TcpSocket> _listen_ptr;
+std::unordered_map<int, std::shared_ptr<Connection>> _connections;
+```
+
+接下来我们写一下事件派发器
+
+```cpp
+void loop() {
+    _running = true;
+
+    // 等监听套接字的读方法写了之后再传读方法
+    registerConnection(_listen_ptr->socket_fd_(), EVENT_IN);
+
+    while(_running)
+    {
+        dispatch(TIMEOUT);
+    }
+}
+
+void dispatch(int timeout)
+{
+	
+}
+```
+
+```cpp
+void dispatch(int timeout)
+{
+    int n = _epoll_ptr->epoll_wait_(_reads, MAXEVENTS, timeout);
+    if(n == 0) _log(Debug, "未收到任何连接");
+
+    // 为了方便, 就不进行差错处理了
+    for(int i = 0; i < n; ++i)
+    {
+        int sock = _reads[i].data.fd;
+        uint32_t event = _reads[i].events;
+	
+		
+    }
+}
+```
+
+现在这个循环里就会收到就绪的事件, 我们就可以通过`sock`文件描述符, 找到`_connections`里面对应的`struct Connection`, 进而调用其中的读写回调, 另外由于可能对于一个文件有多个事件同时就绪, 所以下面我们会写一堆`if`, 而不是`if else`
+
+```cpp
+for(int i = 0; i < n; ++i)
+{
+    int sock = _reads[i].data.fd;
+    uint32_t event = _reads[i].events;
+
+    if(event & EPOLLERR)
+        event |= (EPOLLIN | EPOLLOUT);
+    if(event & EPOLLHUP)
+        event |= (EPOLLIN | EPOLLOUT);
+
+
+}
+```
+
+首先我们需要知道的是, 有可能出现错误的连接(`EPOLLERR`), 和被对端`peer`关闭的连接(`EPOLLHUP`), 对于这种文件, 我们就把它们或上`EPOLLIN | EPOLLOUT`, 这是什么意思呢? 就是把文件异常问题全部转换成IO读写问题, 交给`recv_cb`和`send_cb`它们进行统一处理, 不让它们在这里干扰我们的逻辑. 另外, 由于可能会有多个事件同时就绪, 所以这里的`event`和我们的`EVENT_IN, EVENT_OUT`, 并不完全相同, 所以这里必须用`&`判断事件的有无.
+
+  ```cpp
+  for(int i = 0; i < n; ++i)
+  {
+      int sock = _reads[i].data.fd;
+      uint32_t event = _reads[i].events;
+  
+      if(event & EPOLLERR)
+          event |= (EPOLLIN | EPOLLOUT);
+      if(event & EPOLLHUP)
+          event |= (EPOLLIN | EPOLLOUT);
+  
+      if(event & EPOLLIN)
+      {
+          auto connect_ptr = _connections[sock];
+          // 如果调用方法是存在的
+          if(connect_ptr->_recv_cb)
+              connect_ptr->_recv_cb(connect_ptr);
+      }
+  
+      if(event & EPOLLOUT)
+      {
+          auto connect_ptr = _connections[sock];
+          if(connect_ptr->_send_cb)
+              connect_ptr->_send_cb(connect_ptr);
+      }
+  }
+  ```
+
+接下来就要处理读写事件了, 不过上面的写法其实比较危险, 因为对于出错的连接, 我们知道它会被引导入`_recv_cb`, 然后`_recv_cb`自己再进行处理, 比如自己通过`recv`接口的错误码得知这个连接是错误的, 从而调用`_except_cb`, 对连接进行注销处理, 注销之后, 它已经不存在`_connections`里面了, 但回来之后, 他又会进入`EPOLLOUT`分支, 通过`[]`, 对`_connections`进行污染, 所以我们还要写一个接口, 判断连接是否在`_connections`中
+
+```cpp
+void dispatch(int timeout) {
+    int n = _epoll_ptr->epoll_wait_(_reads, MAXEVENTS, timeout);
+    if (n == 0)
+        _log(Debug, "未收到任何连接");
+
+    // 为了方便, 就不进行差错处理了
+    for (int i = 0; i < n; ++i) {
+        int sock = _reads[i].data.fd;
+        uint32_t event = _reads[i].events;
+
+        if (event & EPOLLERR)
+            event |= (EPOLLIN | EPOLLOUT);
+        if (event & EPOLLHUP)
+            event |= (EPOLLIN | EPOLLOUT);
+
+        if ((event & EPOLLIN) && isRegister(sock)) {
+            auto connect_ptr = _connections[sock];
+            // 如果调用方法是存在的
+            if (connect_ptr->_recv_cb)
+                connect_ptr->_recv_cb(connect_ptr);
+        }
+
+        if ((event & EPOLLOUT) && isRegister(sock)) {
+            auto connect_ptr = _connections[sock];
+            if (connect_ptr->_send_cb)
+                connect_ptr->_send_cb(connect_ptr);
+        }
+    }
+}
+
+bool isRegister(int fd) {
+    auto it = _connections.find(fd);
+    return it != _connections.end();
+}
+```
+
+当然, 就目前来说, 我们只有监听套接字, 所以下面我们写一下监听套接字的读方法, 也就是把连接从传输层的全连接队列中读上应用层.
+
+```cpp
+void Accept(std::weak_ptr<Connection> linsten)
+{
+
+}
+
+void loop() {
+    _running = true;
+
+    registerConnection(_listen_ptr->socket_fd_(), EVENT_IN, std::bind(&LoopServer::Accept, this, std::placeholders::_1));
+
+    while (_running) {
+        dispatch(TIMEOUT);
+    }
+}
+```
+
+首先我们要把`shared_ptr`拿出来, `weak_ptr`只有查看权, 不能访问对象中的资源, 另外, 由于我们使用的是`ET`模式, 所以必须要全部读完, 因此要一直循环, 直到遭遇`EWOULDBLOCK`为止
+
+```cpp
+void Accept(std::weak_ptr<Connection> listen)
+{
+    auto me = listen.lock();
+    while(true)
+    {
+
+    }
+}
+```
+
+```cpp
+void Accept(std::weak_ptr<Connection> listen) {
+    auto me = listen.lock();
+    while (true) {
+        struct sockaddr_in peer;
+        socklen_t len = static_cast<socklen_t>(sizeof(peer));
+        int sock =
+            accept(me->_sock, reinterpret_cast<struct sockaddr *>(&peer), &len);
+
+        // 尽管不太可能, 但我们还是加上等于号
+        if (sock >= 0) {
+            uint16_t port = ntohs(peer.sin_port);
+            char ip[IPBUFFSIZE];
+            inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+
+            _log(Info, "一个新的连接, 描述符:%d, 地址:%s:%d", sock, ip, port);
+
+            SetNonBlock(sock);
+            registerConnection(sock, EVENT_IN);
+        } else {
+            // 读完了
+            if (errno == EWOULDBLOCK)
+                return;
+            // 被信号打断
+            else if (errno == EINTR)
+                continue;
+            // 错误
+            else {
+                _log(Warning, "::accept 错误: %s", strerror(errno));
+            }
+        }
+    }
+}
+```
+
+目前我们只能拿到文件描述符, 所以就用原生系统接口了, 在`accept`的过程, 可能会被信号中断, 对于这种情况, 我们应该继续读, 如果错误码是`EWOULDBLOCK`那就真的读完了, 返回, 一般不会出错, 真要出错了我们也没有办法, 打个日志.
+
+这样既然我们已经把对端的`ip, port`拿出来了, 干脆就在`struct Connection`里再加上相对应的成员
+
+```cpp
+struct Connection {
+
+    Connection(int sock, std::weak_ptr<LoopServer> server_ptr)
+        : _sock(sock), _server_ptr(server_ptr) {}
+
+    int _sock;
+    std::string _inbuff;
+    std::string _outbuff;
+
+    func_t _recv_cb;
+    func_t _send_cb;
+    func_t _except_cb;
+
+    uint16_t _port;
+    std::string _ip;
+
+    std::weak_ptr<LoopServer> _server_ptr;
+};
+
+
+void init() {
+    _listen_ptr->socket_create_();
+    SetNonBlock(_listen_ptr->socket_fd_());
+    _listen_ptr->socket_reuse_port_address_();
+    _listen_ptr->socket_bind_(_port);
+    _listen_ptr->socket_listen_();
+
+    // 监听套接字的注册被移到这里了
+    registerConnection(
+        _listen_ptr->socket_fd_(), EVENT_IN, "0.0.0.0", _port,
+        std::bind(&LoopServer::Accept, this, std::placeholders::_1));
+}
+
+void registerConnection(int sock, uint32_t event, const char *ip,
+                        uint16_t port, func_t recv_cb = nullptr,
+                        func_t send_cb = nullptr,
+                        func_t except_cb = nullptr) {
+    // 注册一个连接分为两步
+
+    // 1. 将连接交付给_connections统一调度
+    // 获取自身(LoopServer)的shared_ptr
+    auto me = shared_from_this();
+    std::shared_ptr<Connection> connection =
+        std::make_shared<Connection>(sock, me);
+    connection->_ip = ip;
+    connection->_port = port;
+    connection->_recv_cb = recv_cb;
+    connection->_send_cb = send_cb;
+    connection->_except_cb = except_cb;
+    _connections.emplace(sock, connection);
+
+    // 2. 将连接添加到epoll对象中
+    _epoll_ptr->epoll_add_(sock, event);
+
+    _log(Debug, "成功注册文件: %d", sock);
+}
+
+void Accept(std::weak_ptr<Connection> listen) {
+    auto me = listen.lock();
+    while (true) {
+        struct sockaddr_in peer;
+        socklen_t len = static_cast<socklen_t>(sizeof(peer));
+        int sock =
+            accept(me->_sock, reinterpret_cast<struct sockaddr *>(&peer), &len);
+
+        // 尽管不太可能, 但我们还是加上等于号
+        if (sock >= 0) {
+            uint16_t port = ntohs(peer.sin_port);
+            char ip[IPBUFFSIZE];
+            inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+
+            _log(Info, "一个新的连接, 描述符:%d, 地址:%s:%d", sock, ip, port);
+
+            SetNonBlock(sock);
+            registerConnection(sock, EVENT_IN, ip, port);
+        } else {
+            // 读完了
+            if (errno == EWOULDBLOCK)
+                return;
+            // 被信号打断
+            else if (errno == EINTR)
+                continue;
+            // 错误
+            else {
+                _log(Warning, "::accept 错误: %s", strerror(errno));
+                return;
+            }
+        }
+    }
+}
+
+void loop() {
+    _running = true;
+
+    while (_running) {
+        dispatch(TIMEOUT);
+    }
+}
+```
+
+在`loop`里面, 我们可以在事件派发的间隙做一些其它事, 做一些空闲任务, 
+
+```cpp
+void loop() {
+    _running = true;
+
+    while (_running) {
+        dispatch(TIMEOUT);
+        RunIdleTasks();
+    }
+}
+```
+
+比如, 在当前这种调试环节, 我们可以打印一下现有的活跃连接
+
+```cpp
+void RunIdleTasks() { PrintConnection(); }
+
+void PrintConnection() {
+    std::cout << "当前活跃连接：";
+    for (const auto &e : _connections) {
+        const auto &conn = e.second;
+        std::cout << conn->_sock << " ";
+    }
+    std::cout<<std::endl;
+}
+```
+
+我们现在可以用`telnet`稍微测试一下
+
+```shell
+[whisper@starry-sky bulid]$ ./reactor_server 
+[Debug][2025-5-8 20:2:16]::成功注册文件: 5
+[Debug][2025-5-8 20:2:19]::未收到任何连接
+当前活跃连接：5 
+[Info][2025-5-8 20:2:21]::一个新的连接, 描述符:6, 地址:127.0.0.1:39314
+[Debug][2025-5-8 20:2:21]::成功注册文件: 6
+当前活跃连接：6 5 
+[Debug][2025-5-8 20:2:24]::未收到任何连接
+当前活跃连接：6 5 
+[Info][2025-5-8 20:2:24]::一个新的连接, 描述符:7, 地址:120.55.90.240:53694
+[Debug][2025-5-8 20:2:24]::成功注册文件: 7
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:27]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:30]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:33]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:36]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:39]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:42]::未收到任何连接
+当前活跃连接：7 6 5 
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:45]::未收到任何连接
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:48]::未收到任何连接
+当前活跃连接：7 6 5 
+当前活跃连接：7 6 5 
+[Debug][2025-5-8 20:2:53]::未收到任何连接
+当前活跃连接：7 6 5 
+^C
+[whisper@starry-sky bulid]$ 
+```
+
+监听套接字是`5`, `3, 4`中一个可能是`epoll`文件, 另一个是日志单开的文件.
+
+在上面, 我们没有对监听套接字收上来的连接赋予读写异常回调, 下面我们就一个个来写.
+
+```cpp
+void Accept(std::weak_ptr<Connection> listen) {
+    auto me = listen.lock();
+    while (true) {
+        struct sockaddr_in peer;
+        socklen_t len = static_cast<socklen_t>(sizeof(peer));
+        int sock =
+            accept(me->_sock, reinterpret_cast<struct sockaddr *>(&peer), &len);
+
+        // 尽管不太可能, 但我们还是加上等于号
+        if (sock >= 0) {
+            uint16_t port = ntohs(peer.sin_port);
+            char ip[IPBUFFSIZE];
+            inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+
+            _log(Info, "一个新的连接, 描述符:%d, 地址:%s:%d", sock, ip, port);
+
+            SetNonBlock(sock);
+            registerConnection(
+                sock, EVENT_IN, ip, port,
+                std::bind(&LoopServer::Recver, this, std::placeholders::_1),
+                std::bind(&LoopServer::Sender, this, std::placeholders::_1),
+                std::bind(&LoopServer::Excepter, this, std::placeholders::_1));
+        } else {
+            // 读完了
+            if (errno == EWOULDBLOCK)
+                return;
+            // 被信号打断
+            else if (errno == EINTR)
+                continue;
+            // 错误
+            else {
+                _log(Warning, "::accept 错误: %s", strerror(errno));
+                return;
+            }
+        }
+    }
+}
+
+void Recver(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+}
+
+void Sender(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+}
+
+void Excepter(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+}
+```
+
+我们先写`Recver`, 首先我们需要注意的是, 对于`LoopServer`, 或者说, 我们的`Reactor`框架, 只负责IO问题, 不管数据解析, 对于`LoopServer`来说, 只要把传输层的数据全部读到`struct Connection`里面的缓冲区就行了, 我们要有明确的分层思想. 
+
+```cpp
+void Recver(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+    int sock = me->_sock;
+    while (true) {
+        char buff[IOBUFFSIZE];
+        std::fill(buff, buff + IOBUFFSIZE, 0);
+        ssize_t n = recv(sock, buff, sizeof(buff), 0);
+        if (n > 0) {
+            me->_inbuff += buff;
+        } else if (n == 0) {
+            _log(Info, "用户[%s:%d]退出了连接, 来自fd(%d)的消息...", me->_ip.c_str(),
+                 me->_port, sock);
+            me->_except_cb(me);
+            return;
+        } else {
+            if (errno == EWOULDBLOCK)
+                return;
+            else if (errno == EINTR)
+                continue;
+            else {
+                _log(Info, "连接[%s:%d]出错, 来自fd(%d)的消息", me->_ip.c_str(),
+                     me->_port, sock);
+                me->_except_cb(me);
+                return;
+            }
+        }
+    }
+}
+```
+
+老样子, 没出错使劲读, 追加到连接对象的缓冲区中, 要等于零, 那就是用户退出了, 调用异常处理回调, 错误码为`EWOULDBLOCK`, 说明真的读完了, 该返回了, 错误码是`EINTR`, 说明被信号中断了, 可能还有数据, 还要继续读, 剩下一种情况, 就是连接出问题了, 依旧调用异常回调, 让异常回调注销掉这个连接, `fill`类似于`memset`, 就是把缓冲区清零, 只不过`fill`还支持非单字节数据的填满.
+
+为了让效果更明显, 我们可以让打印把缓冲区中数据也打印一下
+
+```cpp
+void PrintConnection() {
+    std::cout << "当前活跃连接：" << std::endl;
+    for (const auto &e : _connections) {
+        const auto &conn = e.second;
+        if (conn->_inbuff.empty())
+            continue;
+
+        std::cout << "----------------------------------------" << std::endl;
+        std::cout << "fd        : " << e.first << std::endl;
+        std::cout << "地址      : " << conn->_ip << ":" << conn->_port
+            << std::endl;
+        std::cout << "接收数据  : " << conn->_inbuff << std::endl;
+    }
+    std::cout << "========================================" << std::endl
+        << std::endl;
+}
+```
+
+下面我们再测试一下, 但在此之前, 我们先在`Excepter`里加点东西, 否则没有现象
+
+```cpp
+void Excepter(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+    _log(Info, "关闭连接<%d>[%s:%d]", me->_sock, me->_ip.c_str(), me->_port);
+   
+}
+```
+
+```shell
+[Debug][2025-5-8 21:37:17]::成功注册文件: 5
+[Debug][2025-5-8 21:37:18]::未收到任何连接
+当前活跃连接：
+========================================
+
+[Debug][2025-5-8 21:37:19]::未收到任何连接
+当前活跃连接：
+========================================
+
+[Debug][2025-5-8 21:37:20]::未收到任何连接
+当前活跃连接：
+========================================
+
+[Debug][2025-5-8 21:37:21]::未收到任何连接
+当前活跃连接：
+========================================
+
+[Info][2025-5-8 21:37:22]::一个新的连接, 描述符:6, 地址:127.0.0.1:47722
+[Debug][2025-5-8 21:37:22]::成功注册文件: 6
+当前活跃连接：
+========================================
+
+[Debug][2025-5-8 21:37:23]::未收到任何连接
+当前活跃连接：
+========================================
+
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+
+========================================
+
+[Debug][2025-5-8 21:37:25]::未收到任何连接
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+
+========================================
+
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+
+========================================
+
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+[Debug][2025-5-8 21:37:27]::未收到任何连接
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+[Info][2025-5-8 21:37:28]::用户[127.0.0.1:47722]退出了连接, 来自fd(6)的消息...
+[Info][2025-5-8 21:37:28]::关闭连接<6>[127.0.0.1:47722]
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+[Debug][2025-5-8 21:37:29]::未收到任何连接
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+[Debug][2025-5-8 21:37:30]::未收到任何连接
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+[Debug][2025-5-8 21:37:31]::未收到任何连接
+当前活跃连接：
+----------------------------------------
+fd        : 6
+地址      : 127.0.0.1:47722
+接收数据  : xascdsc
+vfvfdb
+bfgbfg
+
+========================================
+
+^C
+[whisper@starry-sky bulid]$ 
+
+```
+
+接下来, 就要把读上来的数据交给协议层进行解析, 如何交给上层, 其实也很简单, 也是借助于回调, 上层提供一个回调对象, 给`LoopServer`, `Recver`之后再用这个回调把数据给协议层.
+
+```cpp
+LoopServer(uint16_t port, func_t OnMessage)
+    : _running(false), _port(port), _epoll_ptr(new Epoller()),
+_listen_ptr(new TcpSocket()) , _OnMessage(OnMessage){}
+
+public:
+static std::shared_ptr<LoopServer> create(uint16_t port, func_t OnMessage) {
+    return std::shared_ptr<LoopServer>(new LoopServer(port, OnMessage));
+}
+
+void Recver(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+    int sock = me->_sock;
+    while (true) {
+        char buff[IOBUFFSIZE];
+        std::fill(buff, buff + IOBUFFSIZE, 0);
+        ssize_t n = recv(sock, buff, sizeof(buff), 0);
+        if (n > 0) {
+            me->_inbuff += buff;
+        } else if (n == 0) {
+            _log(Info, "用户[%s:%d]退出了连接, 来自fd(%d)的消息...",
+                 me->_ip.c_str(), me->_port, sock);
+            me->_except_cb(me);
+            return;
+        } else {
+            if (errno == EWOULDBLOCK)
+                break;// 注意这变成break了
+            else if (errno == EINTR)
+                continue;
+            else {
+                _log(Info, "连接[%s:%d]出错, 来自fd(%d)的消息", me->_ip.c_str(),
+                     me->_port, sock);
+                me->_except_cb(me);
+                return;
+            }
+        }
+    }
+
+    _OnMessage(me);
+}
+
+private:
+bool _running;
+uint16_t _port;
+struct epoll_event _reads[MAXEVENTS];
+std::shared_ptr<Epoller> _epoll_ptr;
+wind::Log &_log = wind::Log::getInstance();
+std::shared_ptr<TcpSocket> _listen_ptr;
+std::unordered_map<int, std::shared_ptr<Connection>> _connections;
+
+func_t _OnMessage;
+```
+
+```cpp
+void RunIdleTasks() {
+    // PrintConnection();
+}
+
+void DefaultOnMessage(std::weak_ptr<Connection> conn)
+{
+    auto me = conn.lock();
+
+    std::cout<<"协议层得到了数据:"<<me->_inbuff;
+}
+
+int main()
+{
+    std::shared_ptr<LoopServer> server = LoopServer::create(default_port, DefaultOnMessage);
+    server->init();
+    server->loop();
+    return 0;
+}
+```
+
+```shell
+[whisper@starry-sky bulid]$ ./reactor_server 
+[Debug][2025-5-8 21:53:58]::成功注册文件: 5
+[Debug][2025-5-8 21:53:59]::未收到任何连接
+[Debug][2025-5-8 21:54:0]::未收到任何连接
+[Debug][2025-5-8 21:54:1]::未收到任何连接
+[Info][2025-5-8 21:54:1]::一个新的连接, 描述符:6, 地址:127.0.0.1:59754
+[Debug][2025-5-8 21:54:1]::成功注册文件: 6
+[Debug][2025-5-8 21:54:2]::未收到任何连接
+协议层得到了数据:cdsvdsv
+[Debug][2025-5-8 21:54:4]::未收到任何连接
+[Debug][2025-5-8 21:54:5]::未收到任何连接
+[Debug][2025-5-8 21:54:6]::未收到任何连接
+[Debug][2025-5-8 21:54:7]::未收到任何连接
+[Debug][2025-5-8 21:54:8]::未收到任何连接
+协议层得到了数据:cdsvdsv
+vfdbvdbfgbf
+[Debug][2025-5-8 21:54:9]::未收到任何连接
+协议层得到了数据:cdsvdsv
+vfdbvdbfgbf
+gvbdbfgbfn
+[Debug][2025-5-8 21:54:10]::未收到任何连接
+[Debug][2025-5-8 21:54:11]::未收到任何连接
+[Debug][2025-5-8 21:54:12]::未收到任何连接
+[Debug][2025-5-8 21:54:13]::未收到任何连接
+[Debug][2025-5-8 21:54:14]::未收到任何连接
+[Info][2025-5-8 21:54:15]::用户[127.0.0.1:59754]退出了连接, 来自fd(6)的消息...
+[Info][2025-5-8 21:54:15]::关闭连接<6>[127.0.0.1:59754]
+[Debug][2025-5-8 21:54:16]::未收到任何连接
+[Debug][2025-5-8 21:54:17]::未收到任何连接
+[Debug][2025-5-8 21:54:18]::未收到任何连接
+^C
+[whisper@starry-sky bulid]$ 
+
+```
+
+下面我们把我们自己写的应用层协议拷过来
+
+```shell
+[whisper@starry-sky LoopServer]$ tree src include
+src
+├── LoopClient.cc
+└── LoopServer.cc
+include
+├── Epoller.hpp
+├── log.hpp
+├── LoopServer.hpp
+├── NonCopy.hpp
+├── Protocols.hpp 
+├── ServerCal.hpp
+├── Sockst.hpp
+└── TcpSocket.hpp
+
+2 directories, 10 files
+[whisper@starry-sky LoopServer]$ 
+```
+
+`LoopClient.cc`的内容是之前自定义协议的`ClientCal.cc`, `Protocols.hpp`是协议头文件, `ServerCal.hpp`是报文解析类
+
+![image-20250508232215549](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250508232217208.png)
+
+我们的协议层就可以直接复用之前的
+
+```cpp
+#include"LoopServer.hpp"
+#include"ServerCal.hpp"
+
+static const uint16_t default_port = 8888;
+
+calculator cal;
+
+void DefaultOnMessage(std::weak_ptr<Connection> conn)
+{
+    auto me = conn.lock();
+
+    std::cout<<"协议层得到了数据:"<<me->_inbuff;
+
+    std::string response_str = cal(me->_inbuff);
+
+    if(response_str.empty()) return;
+
+    std::cout<<response_str<<std::endl;
+
+    me->_outbuff += response_str;
+
+    me->_send_cb(me);
+}
+
+int main()
+{
+    std::shared_ptr<LoopServer> server = LoopServer::create(default_port, DefaultOnMessage);
+    server->init();
+    server->loop();
+    return 0;
+}
+```
+
+能成功解析出报文就把解析出的数据写到连接的发送缓冲区里面, 当前我们的应用程度比较轻, 所以可以直接进行解析, 如果将来上层的任务很重, 那么就可以引入多线程, 就像生产消费模型那样.
+
+协议层如果能解析成功, 会自动把一个完整报文从连接接收缓冲区上截取.
+
+发送比较特别, 怎么说呢? 因为传输层的发送缓冲区一般来说都是有空间的, 所以对于写事件来说, 绝大多数情况下都是就绪的, 所以我们对于写不能设置常关心, 这样会影响效率, 这点就和读不太一样, 读一直都是常关心, 有数据就读.
+
+写的具体流程是, 首先也是使劲写, 每写一部分就把应用层的这一部分`erase`掉, 最后如果应用层发送缓冲区是空的, 那就说明之后我不需要在写了, 所以我取消对该连接的写关心, 如果不为空, 那就说明下一次我还要发, 所以继续对该链接保持写关心.
+
+```cpp
+void Sender(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+
+    while (true) {
+        ssize_t n = send(me->_sock, me->_outbuff.c_str(), me->_outbuff.size(), 0);
+        if (n > 0)
+            me->_outbuff.erase(0, n);
+        else if (n == 0)
+            break; // 发完了出去
+        else {
+            if (errno == EWOULDBLOCK)
+                break;
+            else if (errno == EINTR)
+                continue;
+            else {
+                _log(Warning, "连接[$s:%d]出错, 来自fd(%d)的消息:%s", me->_ip.c_str(),
+                     me->_port, me->_sock, strerror(errno));
+                me->_except_cb(me);
+                return;
+            }
+        }
+    }
+
+    if (me->_outbuff.empty()) {
+        // 取消写关心
+    } else {
+        // 维持写关心
+    }
+}
+```
+
+下面我们写一个接口, 用来调整关心事件
+
+```cpp
+void Sender(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+
+    while (true) {
+        ssize_t n = send(me->_sock, me->_outbuff.c_str(), me->_outbuff.size(), 0);
+        if (n > 0)
+            me->_outbuff.erase(0, n);
+        else if (n == 0)
+            break; // 发完了出去
+        else {
+            if (errno == EWOULDBLOCK)
+                break;
+            else if (errno == EINTR)
+                continue;
+            else {
+                _log(Warning, "连接[$s:%d]出错, 来自fd(%d)的消息:%s", me->_ip.c_str(),
+                     me->_port, me->_sock, strerror(errno));
+                me->_except_cb(me);
+                return;
+            }
+        }
+    }
+
+    if (me->_outbuff.empty()) {
+        // 取消写关心
+        AdjustEventMask(me->_sock, true, false);
+    } else {
+        // 维持写关心
+        AdjustEventMask(me->_sock, true, true);
+    }
+}
+
+void AdjustEventMask(int sockfd, bool wantRead, bool wantWrite) {
+    uint32_t event = 0;
+    event |= ((wantRead ? EPOLLIN : 0) | (wantWrite ? EPOLLOUT : 0) | EPOLLET);
+    _epoll_ptr->epoll_mod_(sockfd, event);
+}
+```
+
+下面我们可以来测试一下, 以前的协议层似乎有些小问题, 进行了一定的微调
+
+```shell
+[whisper@starry-sky bulid]$ ./reactor_client 
+=========================== 测试开始 ===========================
+
+------------------------ 测试 1 ------------------------
+运算表达式: _x: 42  _y: 97  _op: &
+发出报文: 
+-------------------------- 原始报文 --------------------------
+24
+{"op":38,"x":42,"y":97}
+
+
+------------------------- 计算结果 --------------------------
+_val: 0  _errno: UNSUPPORTED_OPERATION
+============================== 完成 =============================
+
+------------------------ 测试 2 ------------------------
+运算表达式: _x: 83  _y: 47  _op: *
+发出报文: 
+-------------------------- 原始报文 --------------------------
+24
+{"op":42,"x":83,"y":47}
+
+
+------------------------- 计算结果 --------------------------
+_val: 3901  _errno: RELIABLE
+============================== 完成 =============================
+
+------------------------ 测试 3 ------------------------
+运算表达式: _x: 8  _y: 12  _op: +
+发出报文: 
+-------------------------- 原始报文 --------------------------
+23
+{"op":43,"x":8,"y":12}
+
+
+------------------------- 计算结果 --------------------------
+_val: 20  _errno: RELIABLE
+============================== 完成 =============================
+
+------------------------ 测试 4 ------------------------
+运算表达式: _x: 11  _y: 7  _op: *
+发出报文: 
+-------------------------- 原始报文 --------------------------
+23
+{"op":42,"x":11,"y":7}
+
+
+------------------------- 计算结果 --------------------------
+_val: 77  _errno: RELIABLE
+============================== 完成 =============================
+
+------------------------ 测试 5 ------------------------
+运算表达式: _x: 10  _y: 11  _op: &
+发出报文: 
+-------------------------- 原始报文 --------------------------
+24
+{"op":38,"x":10,"y":11}
+
+
+------------------------- 计算结果 --------------------------
+_val: 0  _errno: UNSUPPORTED_OPERATION
+============================== 完成 =============================
+
+=========================== 测试结束 ===========================
+[whisper@starry-sky bulid]$ 
+```
+
+我们看到, 服务端成功处理了报文, 并对其进行了响应, 客户端也成功收到了.
+
+下面我们就来写异常处理了, 实际上就是把连接从应用层注销.
+
+```cpp
+void Excepter(std::weak_ptr<Connection> connection) {
+    auto me = connection.lock();
+    _log(Info, "关闭连接<%d>[%s:%d]", me->_sock, me->_ip.c_str(), me->_port);
+
+    // 1. 把连接从epoll里删除
+    _epoll_ptr->epoll_del_(me->_sock);
+
+    // 2. 把连接从_connections里取出
+    _connections.erase(me->_sock);
+
+    // 3. 告诉传输层关闭连接  或者可以让Connection析构时自动关闭
+    close(me->_sock);
+}
+```
+
+现在我们再来实验一下
+
+```shell
+[whisper@starry-sky bulid]$ ./reactor_server 
+[Debug][2025-5-9 15:19:59]::成功注册文件: 5
+[Debug][2025-5-9 15:20:0]::未收到任何连接
+[Debug][2025-5-9 15:20:1]::未收到任何连接
+[Info][2025-5-9 15:20:2]::一个新的连接, 描述符:6, 地址:175.24.175.224:40316
+[Debug][2025-5-9 15:20:2]::成功注册文件: 6
+协议层得到了数据:24
+{"op":45,"x":44,"y":60}
+
+22
+{"errno":0,"val":-16}
+
+
+协议层得到了数据:23
+{"op":47,"x":3,"y":96}
+
+20
+{"errno":0,"val":0}
+
+
+协议层得到了数据:24
+{"op":45,"x":26,"y":14}
+
+21
+{"errno":0,"val":12}
+
+
+协议层得到了数据:23
+{"op":43,"x":5,"y":89}
+
+21
+{"errno":0,"val":94}
+
+
+协议层得到了数据:23
+{"op":38,"x":10,"y":9}
+
+20
+{"errno":2,"val":0}
+
+
+[Info][2025-5-9 15:20:4]::用户[175.24.175.224:40316]退出了连接, 来自fd(6)的消息...
+[Info][2025-5-9 15:20:4]::关闭连接<6>[175.24.175.224:40316]
+[Debug][2025-5-9 15:20:5]::未收到任何连接
+[Info][2025-5-9 15:20:5]::一个新的连接, 描述符:6, 地址:175.24.175.224:34368
+[Debug][2025-5-9 15:20:5]::成功注册文件: 6
+协议层得到了数据:24
+{"op":43,"x":32,"y":35}
+
+21
+{"errno":0,"val":67}
+
+
+协议层得到了数据:24
+{"op":42,"x":57,"y":15}
+
+22
+{"errno":0,"val":855}
+
+
+协议层得到了数据:24
+{"op":38,"x":20,"y":21}
+
+20
+{"errno":2,"val":0}
+
+
+协议层得到了数据:24
+{"op":45,"x":69,"y":78}
+
+21
+{"errno":0,"val":-9}
+
+
+协议层得到了数据:24
+{"op":47,"x":52,"y":65}
+
+20
+{"errno":0,"val":0}
+
+
+[Info][2025-5-9 15:20:7]::用户[175.24.175.224:34368]退出了连接, 来自fd(6)的消息...
+[Info][2025-5-9 15:20:7]::关闭连接<6>[175.24.175.224:34368]
+[Debug][2025-5-9 15:20:8]::未收到任何连接
+^C
+[whisper@starry-sky bulid]$ 
+```
+
+```shell
+[whisper@starry-sky LoopServer]$ find . -type f -name "*.hpp" -o -name "*.cc"  | xargs wc -l
+   30 ./src/LoopServer.cc
+   69 ./src/LoopClient.cc
+  153 ./include/TcpSocket.hpp
+   15 ./include/ServerCal.hpp
+  230 ./include/Protocols.hpp
+  179 ./include/log.hpp
+  302 ./include/LoopServer.hpp
+   65 ./include/Epoller.hpp
+  127 ./include/Sockst.hpp
+    8 ./include/NonCopy.hpp
+ 1178 total
+[whisper@starry-sky LoopServer]$ 
+```
+
+下面我们再说点别的
+
+上面的`LoopServer`只是一个非常基础的`Reactor`服务器框架, 我们可以把里面的组件一一拆分出来, 从而进行扩展. 
+
+比如, 我们可以把监听套接字组件及其相关的接口拆出来, 形成一个独立的组件, 然后因为`Accept`的参数有`weak_ptr<Connection>`, 而`struct Connection`里面可是有`LoopServer`的回指指针的, 这样的话, 监听组件就可以找到服务器框架,有什么需要的都可以自己拿.
+
+然后在服务器启动之后, 再把监听套接字组件的对应连接和读方法注册进去, 其实还是那回事, 只不过监听套接字现在成独立组件了.
+
+拆成独立组件的好处就是一是模块化分层设计便于扩展, 二是, 可以就此将`Reactor`升级成多线程版本.最开始, 我们在主线程创建一个拥有监听连接的`Reactor`, 然后创建多线程, 每个线程创建一个没有监听连接的`Reactor`, 倒也不是说一定不能有监听连接, 在这里我想强调的是, 这些`Reactor`, 无论是主线程的, 还是副线程里面的, 一个监听连接有且只能直接对应一个`Reactor`, 否则可能会引发所谓的"惊群"问题, 就是多个线程共用一个监听连接, 有新连接内核不知道要唤醒哪个线程.
+
+然后然后这些`Reactor`都建立一个共用的缓冲区, 形成生产消费模型, 主`Reactor`不负责具体业务, 因为它有监听连接, 所以就可以把新连接收上来, 并把连接放到这个共用的缓冲区里面, 充当生产者的角色, 其它的副`Reactor`, 则充当消费者的角色, 它们以线程竞争的方式从共用缓冲区里面拿连接, 在线程竞争的过程中, 就实现了负载均衡. 
+
+副`Reactor`们把连接拿出来后, 再把这些连接注册到自己的连接管理器中, 日后就由这些副`Reactor`们进行管理, 这种工作模式叫做"one thread one loop", 我这里就不改了, 写实际项目时再实现.
+
+
+
+对于一个真正的`Reactor`服务器框架来说, 连接管理是不可或缺的. 比如有的连接迟迟没反应, 那我就把你关了.
+
+我们可以设定一个超时时间, 应用层的超时时间, 以时间戳的形式记录每个连接的超时连接, 每次连接有就绪事件你就更新一下超时时间戳, 以小根堆的形式将它们进行管理, 还记得之前的那个空闲任务接口吗? `RunIdleTasks()`, 我们可以在其中增加连接管理功能, 在每次事件派发的间隙, 把堆顶元素拿出来看看, 看看堆顶对应的连接有没有超时,  超时就把它`pop`掉, 各种意义上的, 一是直接把它从小根堆里拿出, 二是把连接注销掉, 然后再看看新堆顶, 看看有没有超时, 重复这些逻辑.
+
+我们也可以把上述和时间相关的内容独立出来形成一个新的组件, 每次间隙让服务器把这个组件包含一下, 间隙调用方法检查一下, 定时组件自己也调用服务器给的回调去处理那些超时的连接.
+
+
+
+以下是理论部分.
+
+`Reactor`是一个半同步半异步服务器框架模型, 是Linux使用的服务器框架, 译作"反应堆", 它以事件为驱动, 依据不同的事件调用不同的回调方法.   同步体现在`epoll_wait`, 异步体现在多线程, 包括任务上的多线程和IO上的多线程.
 
 # 完 
