@@ -1,28 +1,55 @@
 #pragma once
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
-#include <asm/ldt.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/user.h>
 #include <unistd.h>
 
-#include <cstring>
+#include <functional>
+#include <memory>
 
-// 应用层线程结构体
-typedef struct {
-    pid_t tid;              // 内核轻量级进程ID
-    pid_t child_tid;        // 线程退出标志位
-    void* (*start)(void*);  // 应用级任务函数
-    void* arg;              // 应用级任务参数
-    void* tls_men;          // 局部存储段地址
-    void* result;           // 应用级任务结果
-    int joined;             // 是否已经合并
-} my_thread_t;
+template <typename Result_t>
+class myThread {
+    using self_t = myThread<Result_t>;
 
-// 面向内核的任务函数
-int __start_routine(void* arg);
+    class fn {
+       public:
+        static int routine(void* arg);
+    };
 
-// 面向应用的线程创建
-int my_thread_create(my_thread_t* newthread, void* (*start_routine)(void*), void* arg);
+   public:
+    // 静态创建 + RAII
+    template <typename Func, typename... Args>
+    static std::unique_ptr<self_t> create(Func&& func, Args&&... args);
+
+    // 等待线程结束并获取结果
+    Result_t join();
+
+    // 禁止拷贝，允许移动
+    myThread(const myThread&) = delete;
+    myThread& operator=(const myThread&) = delete;
+    myThread(myThread&&) = default;
+    myThread& operator=(myThread&&) = default;
+
+    ~myThread() = default;
+
+   private:
+    template <typename Func, typename... Args>
+    explicit myThread(Func&& func, Args&&... args);
+
+   private:
+    std::shared_ptr<void> mem;  // 栈 + 守护页 + TLS
+    pid_t tid{};
+    pid_t child_tid{};
+    Result_t result{};
+    std::function<Result_t()> task;
+
+    static constexpr size_t STACK_SIZE = 1 << 21;  // 2MB
+    static constexpr size_t GUARD_SIZE = 1 << 12;  // 4KB
+    static constexpr size_t TLS_SIZE = 1 << 12;    // 4KB
+    static constexpr size_t TOTAL_SIZE = STACK_SIZE + GUARD_SIZE + TLS_SIZE;
+};
