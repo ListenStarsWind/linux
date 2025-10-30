@@ -1,0 +1,53 @@
+# ----------------------------------------
+# Build artifacts
+# ----------------------------------------
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+CMakeConfigureLog.yaml
+
+# ----------------------------------------
+# Compiler output
+# ----------------------------------------
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+*.app
+
+# ----------------------------------------
+# IDE / Editor configs
+# ----------------------------------------
+.vscode/
+.idea/
+*.user
+*.user.*
+*.suo
+*.ncb
+*.pro.user
+*.qbs.user
+*.qmlproject.user
+*.autosave
+
+# ----------------------------------------
+# System files
+# ----------------------------------------
+.DS_Store
+Thumbs.db
+
+# ----------------------------------------
+# Logs / Temp
+# ----------------------------------------
+*.log
+*.tmp
+*.swp
+*.bak

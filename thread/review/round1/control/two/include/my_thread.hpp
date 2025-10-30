@@ -6,7 +6,6 @@
 // ================================================================
 // 一、系统级头文件（必须在最前）
 // ================================================================
-#define _GNU_SOURCE     // 必须在所有系统头之前
 #include <asm/prctl.h>  // ARCH_SET_FS / ARCH_GET_FS
 #include <errno.h>
 #include <linux/futex.h>
@@ -30,18 +29,29 @@
 // 手动定义 clone_args（覆盖可能不完整的 <linux/sched.h>）
 // ---------------------------------------------------------------
 struct clone_args {
-    size_t size;            // 必须第一个
-    uint64_t flags;         // 必填
-    uint64_t pidfd;         // 可 0
-    uint64_t child_tid;     // CLONE_CHILD_CLEARTID 时使用
-    uint64_t parent_tid;    // CLONE_PARENT_SETTID 时使用
-    uint64_t exit_signal;   // 必填（SIGCHLD）
-    uint64_t stack;         // 子进程栈底指针（高地址）
-    uint64_t stack_size;    // 可 0
-    uint64_t tls;           // TLS 描述符地址
-    uint64_t set_tid;       // 可 0
-    uint64_t set_tid_size;  // 可 0
-    uint64_t cgroup;        // 可 0
+    uint64_t flags;
+    uint64_t pidfd;
+    uint64_t child_tid;
+    uint64_t parent_tid;
+    uint64_t exit_signal;
+    uint64_t stack;
+    uint64_t stack_size;
+    uint64_t tls;
+    uint64_t set_tid;
+    uint64_t set_tid_size;
+    uint64_t cgroup;
+    void* (*fn)(void*);
+    void* fn_arg;
+};
+
+// ========== 局部存储基地址引导结构 ==========
+struct tls_descriptor {
+    void* tcb;           // 指向自身
+    void* dtv;           // 动态线程向量
+    void* self;          // 指向 pthread 结构体
+    void* _padding[13];  // 填充到 128 字节（glibc 实际更大）
+    void* stack_guard;   // 栈保护
+    // 更多字段... 我们只初始化关键的
 };
 
 // ================================================================
@@ -51,7 +61,7 @@ enum {
     STACK_SIZE = 1 << 21,  // 2MB 栈
     GUARD_SIZE = 1 << 12,  // 4KB 守护页
     TLS_SIZE = 1 << 12,    // 4KB TLS
-    TOTAL_SIZE = STACK_SIZE + GUARD_SIZE + TLS_SIZE
+    TOTAL_SIZE = STACK_SIZE + GUARD_SIZE
 };
 
 // ===================================================================
@@ -63,7 +73,7 @@ class myThread {
 
     class fn {
        public:
-        static int routine(void* arg);
+        static void* routine(void* arg);
     };
 
    public:
@@ -87,7 +97,8 @@ class myThread {
     explicit myThread(Func&& func, Args&&... args);
 
    private:
-    std::shared_ptr<void> mem;  // 栈 + 守护页 + TLS
+    std::shared_ptr<char> stack_base;
+    std::shared_ptr<char> tls_base;
     pid_t tid{};
     pid_t child_tid{};
     Result_t result{};
@@ -108,14 +119,14 @@ class myThread<void> {
 
     class fn {
        public:
-        static int routine(void* arg);
+        static void* routine(void* arg);
     };
 
    public:
     template <typename Func, typename... Args>
     static std::unique_ptr<self_t> create(Func&& func, Args&&... args);
 
-    void join();  // 返回 void
+    void join();
 
     myThread(const myThread&) = delete;
     myThread& operator=(const myThread&) = delete;
@@ -128,10 +139,11 @@ class myThread<void> {
     explicit myThread(Func&& func, Args&&... args);
 
    private:
-    std::shared_ptr<void> mem;
-    pid_t tid{};
-    pid_t child_tid{};
-    std::function<void()> task;  // 无返回值
+    std::shared_ptr<char> stack_base;
+    std::shared_ptr<char> tls_base;
+    pid_t tid = 0;
+    pid_t child_tid = 0;
+    std::function<void()> task;
 
     static constexpr size_t STACK_SIZE = ::STACK_SIZE;  // 2MB
     static constexpr size_t GUARD_SIZE = ::GUARD_SIZE;  // 4KB
@@ -140,15 +152,14 @@ class myThread<void> {
 };
 
 // ===================================================================
-// 实现
+// 模版实现
 // ===================================================================
 
 template <typename Result_t>
-int myThread<Result_t>::fn::routine(void* arg) {
+void* myThread<Result_t>::fn::routine(void* arg) {
     auto* self = static_cast<self_t*>(arg);
     self->result = self->task();
-    syscall(SYS_exit, 0);
-    // return 0;
+    return nullptr;
 }
 
 template <typename Result_t>
@@ -164,50 +175,98 @@ template <typename Result_t>
 template <typename Func, typename... Args>
 myThread<Result_t>::myThread(Func&& func, Args&&... args)
     : task(std::bind(std::forward<Func>(func), std::forward<Args>(args)...)) {
-    // 分配：守护页 | 栈 | TLS
-    void* ptr =
+    // 栈及守护页空间申请
+    void* ptr1 =
         mmap(nullptr, TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) return;
 
-    mem = std::shared_ptr<void>(ptr, [](void* p) { munmap(p, TOTAL_SIZE); });
+    // 申请失败. 提前结束
+    if (ptr1 == MAP_FAILED) return;
 
-    char* base = static_cast<char*>(mem.get());
+    // 生命周期托管至智能指针
+    stack_base =
+        std::shared_ptr<char>(static_cast<char*>(ptr1), [](char* p) { munmap(p, TOTAL_SIZE); });
 
-    // 守护页
-    if (mprotect(base, GUARD_SIZE, PROT_NONE) == -1) {
-        mem.reset();
+    auto stack_base__ = stack_base.get();
+
+    // 为整个空间进行清零初始化, 防止异常干扰
+    memset(stack_base__, 0, TOTAL_SIZE);
+
+    // 修改守护页属性, 取消所有属性, 实现自爆功能
+    if (mprotect(stack_base__, GUARD_SIZE, PROT_NONE) == -1) {
+        stack_base.reset();
         return;
     }
 
-    auto stack = static_cast<char*>(base) + GUARD_SIZE;  // 栈底
-    // 64为系统要求基地址要对齐16字节, 也就是低四位要抹零
-    auto stack_top =
-        reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(stack + STACK_SIZE) & ~0xF));  // 栈顶
-    void* tls_base = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(stack_top + 0x10) &
-                                              ~0xF));  // 局部存储, 与栈顶间隔一段距离, 防止干扰栈
+    auto stack_bottom = stack_base__ + GUARD_SIZE;  // 栈底
+    char* stack_top = stack_bottom + STACK_SIZE;
+    // 64为系统要求基地址要对齐16字节, 也就是低四位抹零 ULL表示无符号长整型
+    stack_top = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(stack_top) & ~0xFULL);
 
-    // clone
-    const int flags = CLONE_VM |              // 1. 共享内存空间
-                      CLONE_FS |              // 2. 共享文件系统信息（cwd, root）
-                      CLONE_FILES |           // 3. 共享文件描述符表
-                      CLONE_SIGHAND |         // 4. 共享信号处理程序
-                      CLONE_THREAD |          // 5. 加入同一线程组（TGID 相同）
-                      CLONE_SYSVSEM |         // 6. 共享 System V 信号量调整
-                      CLONE_PARENT_SETTID |   // 7. 父进程写入子 tid
-                      CLONE_CHILD_CLEARTID |  // 8. 子退出时清零 child_tid + futex 唤醒
-                      CLONE_SETTLS |          // 9. 设置 TLS（配合tls_base）
-                      SIGCHLD;                // 10. 退出时发 SIGCHLD 信号
+    // 单独开辟 局部存储空间, 一块开辟容易相互干扰
+    void* ptr2 =
+        mmap(nullptr, TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-    // int ret = clone(&fn::routine, stack_top, flags, this, &tid, tls_base, &child_tid);
+    // 申请失败, 提前终止
+    if (ptr2 == MAP_FAILED) return;
 
-    int ret = syscall(SYS_clone, flags, stack_top, &tid, &child_tid, tls_base);
-    if (ret == -1) {
-        mem.reset();
+    // 生命周期托管至智能指针
+    tls_base =
+        std::shared_ptr<char>(static_cast<char*>(ptr2), [](char* p) { munmap(p, TLS_SIZE); });
+
+    auto tls_base__ = tls_base.get();
+
+    // 清零初始化防止原先数据干扰
+    memset(tls_base__, 0, TLS_SIZE);
+
+    // 局部存储要求 64 字节对齐, 即把 0~63以下的数位抹去
+    tls_base__ = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(tls_base.get()) & ~63ULL);
+
+    // 准备对基地址引导结构进行初始化
+    auto boot = reinterpret_cast<struct tls_descriptor*>(tls_base__);
+    boot->tcb = tls_base__;
+    boot->self = tls_base__;
+    boot->dtv = nullptr;
+
+    // 其余部分不使用, 填充垃圾
+    boot->stack_guard = reinterpret_cast<void*>(0x123456789ABCDEF0ULL);
+
+    struct clone_args params;
+    memset(&params, 0, sizeof(struct clone_args));
+
+    params.flags = CLONE_VM |  // 与父进程共享虚拟内存（创建线程而非独立进程）
+                   CLONE_FS |  // 与父进程共享文件系统信息（cwd、umask 等）
+                   CLONE_FILES |           // 与父进程共享文件描述符表
+                   CLONE_SIGHAND |         // 与父进程共享信号处理器
+                   CLONE_SYSVSEM |         // 与父进程共享 System V 信号量
+                   CLONE_PARENT_SETTID |   // 将子线程 ID 存入父线程提供的地址
+                   CLONE_CHILD_CLEARTID |  // 子线程退出时清除其线程 ID
+                   CLONE_SETTLS;           // 设置子线程的线程局部存储（TLS）
+
+    params.stack = reinterpret_cast<uint64_t>(stack_top);
+    params.stack_size = STACK_SIZE;
+    params.parent_tid = reinterpret_cast<uint64_t>(&tid);
+    params.child_tid = reinterpret_cast<uint64_t>(&child_tid);
+    params.tls = reinterpret_cast<uint64_t>(tls_base__);
+    params.exit_signal = SIGCHLD;
+    params.fn = &fn::routine;
+    params.fn_arg = this;
+
+    auto ret = syscall(SYS_clone3, &params, sizeof(struct clone_args));
+
+    if (ret > 0) {
+        // 返回轻量级进程 ID
+        tid = ret;
+        // 确保内核构造成功后应用层再返回
+        while (child_tid == 0) sched_yield();
+    }
+
+    if (ret < 0) {
+        // 调用失败, 致命错误
+        stack_base.reset();
+        tls_base.reset();
         return;
     }
 
-    // 确保内核异步写入后, 即真正完成轻量级进程创建后, 应用层再完成创建
-    while (child_tid == 0) sched_yield();
 }
 
 template <typename Result_t>
@@ -249,96 +308,110 @@ template <typename Func, typename... Args>
 inline std::unique_ptr<myThread<void>> myThread<void>::create(Func&& func, Args&&... args) {
     auto* raw_ptr = new myThread<void>(std::forward<Func>(func), std::forward<Args>(args)...);
     auto ptr = std::unique_ptr<myThread<void>>(raw_ptr);
-    if (!ptr->mem) return nullptr;
+    if (ptr->tls_base == nullptr || ptr->stack_base == nullptr) return nullptr;
     return ptr;
 }
 
-inline int myThread<void>::fn::routine(void* arg) {
+inline void* myThread<void>::fn::routine(void* arg) {
     auto* self = static_cast<self_t*>(arg);
-    self->task();
-    // syscall(SYS_exit, 0);
-    return 0;
+    if (self->task) self->task();
+    return nullptr;
 }
 
 template <typename Func, typename... Args>
 myThread<void>::myThread(Func&& func, Args&&... args)
     : task(std::bind(std::forward<Func>(func), std::forward<Args>(args)...)) {
-    void* ptr =
+    // 栈及守护页空间申请
+    void* ptr1 =
         mmap(nullptr, TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) return;
 
-    mem = std::shared_ptr<void>(ptr, [](void* p) { munmap(p, TOTAL_SIZE); });
-    char* base = static_cast<char*>(mem.get());
+    // 申请失败. 提前结束
+    if (ptr1 == MAP_FAILED) return;
 
-    // 为整个空间进行清零初始化, 防止异常干扰, 特别是局部存储
-    memset(base, 0, TOTAL_SIZE);
+    // 生命周期托管至智能指针
+    stack_base =
+        std::shared_ptr<char>(static_cast<char*>(ptr1), [](char* p) { munmap(p, TOTAL_SIZE); });
 
-    if (mprotect(base, GUARD_SIZE, PROT_NONE) == -1) {
-        mem.reset();
+    auto stack_base__ = stack_base.get();
+
+    // 为整个空间进行清零初始化, 防止异常干扰
+    memset(stack_base__, 0, TOTAL_SIZE);
+
+    // 修改守护页属性, 取消所有属性, 实现自爆功能
+    if (mprotect(stack_base__, GUARD_SIZE, PROT_NONE) == -1) {
+        stack_base.reset();
         return;
     }
 
-    auto stack = static_cast<char*>(base) + GUARD_SIZE;  // 栈底
-    // 64为系统要求基地址要对齐16字节, 也就是低四位要抹零
-    auto stack_top =
-        reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(stack + STACK_SIZE) & ~0xF));  //栈顶
-    void* tls_base = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(stack_top + 0x10) &
-                                              ~0xF));  // 局部存储, 与栈顶间隔一段距离,
-                                              //防止干扰栈
+    auto stack_bottom = stack_base__ + GUARD_SIZE;  // 栈底
+    char* stack_top = stack_bottom + STACK_SIZE;
+    // 64为系统要求基地址要对齐16字节, 也就是低四位抹零 ULL表示无符号长整型
+    stack_top = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(stack_top) & ~0xFULL);
 
-    // // clone
-    // const int flags = CLONE_VM |              // 1. 共享内存空间
-    //                   CLONE_FS |              // 2. 共享文件系统信息（cwd, root）
-    //                   CLONE_FILES |           // 3. 共享文件描述符表
-    //                   CLONE_SIGHAND |         // 4. 共享信号处理程序
-    //                   CLONE_THREAD |          // 5. 加入同一线程组（TGID 相同）
-    //                   CLONE_SYSVSEM |         // 6. 共享 System V 信号量调整
-    //                   CLONE_PARENT_SETTID |   // 7. 父进程写入子 tid
-    //                   CLONE_CHILD_CLEARTID |  // 8. 子退出时清零 child_tid + futex 唤醒
-    //                   CLONE_SETTLS |          // 9. 设置 TLS（配合 user_desc）
-    //                   SIGCHLD;                // 10. 退出时发 SIGCHLD 信号
+    // 单独开辟 局部存储空间, 一块开辟容易相互干扰
+    void* ptr2 =
+        mmap(nullptr, TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    // 申请失败, 提前终止
+    if (ptr2 == MAP_FAILED) return;
+
+    // 生命周期托管至智能指针
+    tls_base =
+        std::shared_ptr<char>(static_cast<char*>(ptr2), [](char* p) { munmap(p, TLS_SIZE); });
+
+    auto tls_base__ = tls_base.get();
+
+    // 清零初始化防止原先数据干扰
+    memset(tls_base__, 0, TLS_SIZE);
+
+    // 局部存储要求 64 字节对齐, 即把 0~63以下的数位抹去
+    tls_base__ = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(tls_base.get()) & ~63ULL);
+
+    // 准备对基地址引导结构进行初始化
+    auto boot = reinterpret_cast<struct tls_descriptor*>(tls_base__);
+    boot->tcb = tls_base__;
+    boot->self = tls_base__;
+    boot->dtv = nullptr;
+
+    // 其余部分不使用, 填充垃圾
+    boot->stack_guard = reinterpret_cast<void*>(0x123456789ABCDEF0ULL);
 
     struct clone_args params;
-    memset(&params, 0, sizeof(params));
-    params.flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND |
-                   CLONE_SYSVSEM
-                   // 注意：是否加入 CLONE_THREAD 取决于你是否需要线程组行为。
-                   // 先不加 CLONE_THREAD 做测试更稳妥；若要 pthread 等价语义再加上它。
-                   | CLONE_THREAD
-                   | CLONE_PARENT_SETTID  // 内核会在父进程写入 child tid（parent copy）
-                   | CLONE_CHILD_CLEARTID  // 内核在 child 退出时把 *child_tid = 0 并 futex_wake
-                   | CLONE_SETTLS;         // 使用 .tls 字段设置 FS（x86_64）
-    // args.exit_signal = SIGCHLD; // exit_signal used when no CLONE_THREAD and for process-like
-    // behavior
-    params.stack = (uintptr_t)stack_top;  // 子线程的初始栈指针
-    params.stack_size = 0;                // 可选（0 表示不另行指定）
-    params.parent_tid = (uintptr_t)&tid;  // parent copy (内核把 child's TID写到这里作为父的备份) 
-    params.child_tid = (uintptr_t)&child_tid;  // child清零地址（必须为用户可写地址） 
-    params.tls = (uintptr_t)tls_base;          // FS base for child (x86_64)
+    memset(&params, 0, sizeof(struct clone_args));
 
-    long ret = syscall(SYS_clone3, &params, sizeof(params));
+    params.flags = CLONE_VM |  // 与父进程共享虚拟内存（创建线程而非独立进程）
+                   CLONE_FS |  // 与父进程共享文件系统信息（cwd、umask 等）
+                   CLONE_FILES |           // 与父进程共享文件描述符表
+                   CLONE_SIGHAND |         // 与父进程共享信号处理器
+                   CLONE_SYSVSEM |         // 与父进程共享 System V 信号量
+                   CLONE_PARENT_SETTID |   // 将子线程 ID 存入父线程提供的地址
+                   CLONE_CHILD_CLEARTID |  // 子线程退出时清除其线程 ID
+                   CLONE_SETTLS;           // 设置子线程的线程局部存储（TLS）
 
-    if(ret == 0)
-    {
-        // 创建成功, 将执行流引导至执行函数中
-        fn::routine(this);
-        // 向编译器提示, 这里不会被执行
-        __builtin_unreachable();
+    params.stack = reinterpret_cast<uint64_t>(stack_top);
+    params.stack_size = STACK_SIZE;
+    params.parent_tid = reinterpret_cast<uint64_t>(&tid);
+    params.child_tid = reinterpret_cast<uint64_t>(&child_tid);
+    params.tls = reinterpret_cast<uint64_t>(tls_base__);
+    params.exit_signal = SIGCHLD;
+    params.fn = &fn::routine;
+    params.fn_arg = this;
+
+    auto ret = syscall(SYS_clone3, &params, sizeof(struct clone_args));
+
+    if (ret > 0) {
+        // 返回轻量级进程 ID
+        tid = ret;
+        // 确保内核构造成功后应用层再返回
+        while (child_tid == 0) sched_yield();
     }
 
-    // int ret = clone(&fn::routine, stack_top, flags, this, &tid, tls_base, &child_tid);
-
-    // fprintf(stderr,
-    //         "[debug] clone returned=%d, tid(parent copy)=%d, child_tid_addr=%p, "
-    //         "child_tid_value(before)=%d\n",
-    //         ret, tid, (void*)&child_tid, child_tid);
-
-    if (ret == -1) {
-        mem.reset();
+    if (ret < 0) {
+        // 调用失败, 致命错误
+        stack_base.reset();
+        tls_base.reset();
         return;
     }
-
-    while (child_tid == 0) sched_yield();
 }
 
 inline void myThread<void>::join() {
@@ -353,86 +426,3 @@ inline void myThread<void>::join() {
         return;
     }
 }
-
-// template <typename Func, typename... Args>
-// inline std::unique_ptr<myThread<void>> myThread<void>::create(Func&& func, Args&&... args) {
-//     auto* raw_ptr = new myThread<void>(std::forward<Func>(func), std::forward<Args>(args)...);
-//     auto ptr = std::unique_ptr<myThread<void>>(raw_ptr);
-//     if (!ptr->mem) return nullptr;
-//     return ptr;
-// }
-
-// inline int myThread<void>::fn::routine(void* arg) {
-//     auto* self = static_cast<self_t*>(arg);
-//     self->task();
-//     return 0;
-// }
-
-// template <typename Func, typename... Args>
-// myThread<void>::myThread(Func&& func, Args&&... args)
-//     : task(std::bind(std::forward<Func>(func), std::forward<Args>(args)...)) {
-//     void* ptr =
-//         mmap(nullptr, TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-//     if (ptr == MAP_FAILED) return;
-//     mem = std::shared_ptr<void>(ptr, [](void* p) { munmap(p, TOTAL_SIZE); });
-
-//     char* base = static_cast<char*>(mem.get());
-//     memset(base, 0, TOTAL_SIZE);
-
-//     if (mprotect(base, GUARD_SIZE, PROT_NONE) == -1) {
-//         mem.reset();
-//         return;
-//     }
-
-//     char* stack = base + GUARD_SIZE;
-//     char* stack_top =
-//         reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(stack + STACK_SIZE) & ~0xF));
-
-//     void* tls_base =
-//         reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(stack_top + 0x10) & ~0xF));
-
-//     auto params = new struct clone_args();
-
-//     params->flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_SYSVSEM |
-//                     CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_SETTLS;
-//     params->stack = (uintptr_t)stack_top;
-//     params->parent_tid = (uintptr_t)&tid;
-//     params->child_tid = (uintptr_t)&child_tid;
-//     params->tls = (uintptr_t)tls_base;
-//     params->exit_signal = SIGCHLD;  // 必须设置
-//     params->size = sizeof(clone_args);
-
-//     long ret = syscall(SYS_clone3, params, sizeof(clone_args));
-
-//     if (ret == 0) {
-//         // 子线程执行
-//         task();
-//         delete params;
-//         // 清理 child_tid 并唤醒父线程
-//         // __atomic_store_n(&child_tid, 0, __ATOMIC_SEQ_CST);
-//         syscall(SYS_exit, 0);
-//     }
-
-//     if (ret == -1) {
-//         mem.reset();
-//         return;
-//     }
-
-//     // 父线程等待子线程写入 tid
-//     while (child_tid == 0) sched_yield();
-// }
-
-// inline void myThread<void>::join() {
-//     int expected = __atomic_load_n(&child_tid, __ATOMIC_SEQ_CST);
-//     if (expected == 0) return;
-
-//     // 重设期待值
-//     expected = 0;
-//     while (true) {
-//         long ret = syscall(SYS_futex, &child_tid, FUTEX_WAIT, expected, nullptr, nullptr, 0);
-//         if (ret == 0) return;
-//         if (errno == EAGAIN) return;
-//         if (errno == EINTR) continue;
-//         return;
-//     }
-// }
