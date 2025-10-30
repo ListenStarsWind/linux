@@ -4,7 +4,7 @@ project(thread LANGUAGES C CXX)
 # ---------------------
 # 基础设置
 # ---------------------
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Debug)
@@ -22,6 +22,7 @@ file(GLOB SOURCES
     "src/*.c"
     "src/*.cpp"
     "src/*.cc"
+    "include/*.hpp"
 )
 
 # ---------------------
