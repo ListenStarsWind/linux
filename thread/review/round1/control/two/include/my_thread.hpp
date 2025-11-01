@@ -4,6 +4,19 @@
 #endif
 
 // ================================================================
+// 宏：MYTHREAD_ENABLE_CUSTOM_TLS
+// 默认情况下 (设置为 0)，将禁用所有自定义 TLS (线程局部存储) 逻辑,
+// 包括 TCB 结构、mmap 分配、CLONE_SETTLS 标志和 arch_prctl 调用。
+// 将此宏定义为 1 以启用自定义 TLS。
+//
+// 警告：启用此功能 (1) 目前已知会导致与 glibc (C/C++ 标准库) 严重冲突,
+// 除非新线程中只使用纯系统调用，否则会导致崩溃。
+// 禁用 (0) 可使线程与 C/C++ 标准库 (如 std::cout) 兼容。
+// ================================================================
+#define MYTHREAD_ENABLE_CUSTOM_TLS 0
+
+
+// ================================================================
 // 一、系统级头文件（必须在最前）
 // ================================================================
 #include <asm/prctl.h>  // ARCH_SET_FS / ARCH_GET_FS
@@ -29,19 +42,20 @@
 // 手动定义 clone_args（覆盖可能不完整的 <linux/sched.h>）
 // ---------------------------------------------------------------
 struct clone_args {
-    uint64_t flags;         // 要设置的标志位
-    uint64_t pidfd;         // 新进程的 PID 文件描述符
-    uint64_t child_tid;     // 子进程的线程 ID
-    uint64_t parent_tid;    // 父进程的线程 ID
-    uint64_t exit_signal;   // 进程退出时发送的信号
-    uint64_t stack;         // 栈的起始地址
-    uint64_t stack_size;    // 栈的大小
-    uint64_t tls;           // 新进程的线程局部存储
-    uint64_t set_tid;       // 设置线程 ID 的值
-    uint64_t set_tid_size;  // 设置线程 ID 的大小
-    uint64_t cgroup;        // 设置拥有者
+    uint64_t flags;       // 要设置的标志位
+    uint64_t pidfd;       // 新进程的 PID 文件描述符
+    uint64_t child_tid;   // 子进程的线程 ID
+    uint64_t parent_tid;  // 父进程的线程 ID
+    uint64_t exit_signal; // 进程退出时发送的信号
+    uint64_t stack;       // 栈的起始地址
+    uint64_t stack_size;  // 栈的大小
+    uint64_t tls;         // 新进程的线程局部存储
+    uint64_t set_tid;     // 设置线程 ID 的值
+    uint64_t set_tid_size; // 设置线程 ID 的大小
+    uint64_t cgroup;      // 设置拥有者
 };
 
+#if MYTHREAD_ENABLE_CUSTOM_TLS
 /// ========== 局部存储用户级引导结构 (TCB) ==========
 // 局部存储布局为: 高地址 dtv(内核初始化) tcb(用户指定) .....低地址
 // ....低地址
@@ -49,14 +63,19 @@ struct tls_descriptor {
     void* tcb;  // 0: 指向自身 (TCB pointer itself)
     void* dtv;  // 8: 动态线程向量 (Dynamic Thread Vector)
 };
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
 
 // ========== 项目级常量定义 ==========
 enum {
-    STACK_SIZE = 1 << 21,                                // 2MB 栈
-    GUARD_SIZE = 1 << 12,                                // 4KB 守护页
-    TLS_SIZE = 1 << 12,                                  // 4KB TLS
-    TOTAL_STACK_SIZE = (1 << 21) + (1 << 12),            // STACK_SIZE + GUARD_SIZE
+    STACK_SIZE = 1 << 21,                      // 2MB 栈
+    GUARD_SIZE = 1 << 12,                      // 4KB 守护页
+#if MYTHREAD_ENABLE_CUSTOM_TLS
+    TLS_SIZE = 1 << 12,                        // 4KB TLS
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
+    TOTAL_STACK_SIZE = (1 << 21) + (1 << 12),  // STACK_SIZE + GUARD_SIZE
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     TOTAL_MMAP_SIZE = (1 << 21) + (1 << 12) + (1 << 12)  // TOTAL_STACK_SIZE + TLS_SIZE
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
 };
 
 // ===================================================================
@@ -85,25 +104,25 @@ extern "C" void __mythread_start_shim() {
     // 新的轻量级进程第一个动作是 ret: 将 RSP 寄存器指向存储__mythread_start_shim地址的控件
     //     高地址
     // +===================================+
-    // | 0ULL (dummy)                  |  RSP+24
+    // | 0ULL (dummy)                      |  RSP+24
     // +-----------------------------------+
-    // | &thread_exit_func             |  RSP+16   ← addq $16, %rsp 后
+    // | &thread_exit_func                 |  RSP+16    ← addq $16, %rsp 后
     // +-----------------------------------+
-    // | this                          |  RSP+8    ← movq 8(%rsp), %rdi
+    // | this                              |  RSP+8     ← movq 8(%rsp), %rdi
     // +-----------------------------------+
-    // | &__mythread_start_shim        |  RSP      ← 内核 ret 弹出
+    // | &__mythread_start_shim            |  RSP       ← 内核 ret 弹出
     // +===================================+
     // 低地址
     __asm__ volatile(
         // 现在 RSP 即栈维护指针指向存储 __mythread_start_shim 代码段地址的低地址处
-        "movq 8(%%rsp), %%rdi \n"  // 把 RSP 所指地址往上加8个字节, 这样的新地址指向的就是存储 this
-                                   // 的空间, 让后把 this 手动加到 rdi寄存器中,
-                                   // rdi寄存器是C/C++传参时第一个参数写入的位置,注意,
-                                   // RSP本身还没有改变, 仍旧是指向
-                                   // __mythread_start_shim 代码段地址的低地址处
-        "addq $16, %%rsp \n"  // 让 RSP 自加 16字节, 之后它指向存储 &thread_exit_func
-                              // 这个数据的那份空间
-        "jmp __mythread_c_entry \n"  //  跳转的 __mythread_c_entry 代码段入口
+        "movq 8(%%rsp), %%rdi \n" // 把 RSP 所指地址往上加8个字节, 这样的新地址指向的就是存储 this
+                                 // 的空间, 让后把 this 手动加到 rdi寄存器中,
+                                 // rdi寄存器是C/C++传参时第一个参数写入的位置,注意,
+                                 // RSP本身还没有改变, 仍旧是指向
+                                 // __mythread_start_shim 代码段地址的低地址处
+        "addq $16, %%rsp \n" // 让 RSP 自加 16字节, 之后它指向存储 &thread_exit_func
+                             // 这个数据的那份空间
+        "jmp __mythread_c_entry \n" //  跳转的 __mythread_c_entry 代码段入口
         // 执行 __mythread_c_entry 中的代码, 在这个栈上
         // __mythread_c_entry 的末尾会有一个C/C++自动加的汇编指令 ret
         // ret 再次执行, RSP 回到指向存储 &thread_exit_func这个数据的那份空间的状态
@@ -123,7 +142,9 @@ struct thread_common_state {
     typedef std::shared_ptr<char> mem_ptr_t;  // 托管内存的智能指针
 
     mem_ptr_t stack_base;
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     mem_ptr_t tls_base;
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
     pid_t tid{};
     pid_t child_tid{};
     std::function<void()> task_executor;  // C 入口执行的 void() 执行器
@@ -132,11 +153,13 @@ struct thread_common_state {
     // 必须是非虚析构函数，以确保没有虚表指针 (vtable) 影响内存布局
     ~thread_common_state() = default;
 
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     // 访问器，供 C 入口使用
     char* get_tls_base_addr() const {
         if (!stack_base) return nullptr;
         return stack_base.get() + TOTAL_STACK_SIZE;
     }
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
 
     // 友元声明：允许 C++ 入口访问私有成员
     friend void __mythread_c_entry(void* arg);
@@ -241,7 +264,7 @@ class myThread<void> : public thread_common_state {
     // pid_t tid{};                      // REMOVED
     // pid_t child_tid{};                // REMOVED
     // std::shared_ptr<thread_void_result> result; // REMOVED (结果指针是 delegate_type 的私有成员)
-    // std::function<void()> task_executor;        // REMOVED
+    // std::function<void()> task_executor;      // REMOVED
 };
 // ===================================================================
 // 八、C 语言唯一入口点实现
@@ -251,11 +274,18 @@ extern "C" void __mythread_c_entry(void* arg) {
     // --- 核心测试点：使用原始系统调用进行调试打印 ---
     // 目标：绕过 glibc 的 stdio 和内存锁，确认线程是否成功执行 C 代码
     const char* debug_msg = "Thread alive! Before task_executor.\n";
+#if MYTHREAD_ENABLE_CUSTOM_TLS
+    // 警告：当启用 TLS 时，strlen 可能会因 TCB 冲突而崩溃
     syscall(SYS_write, 2, debug_msg, strlen(debug_msg));  // Write to stderr (fd 2)
+#else
+    // 当 TLS 禁用时，glibc TCB 是完好的，可以安全调用 strlen
+    syscall(SYS_write, 2, debug_msg, strlen(debug_msg));  // Write to stderr (fd 2)
+#endif
     // ---------------------------------------------------------
 
     thread_common_state* self_base = static_cast<thread_common_state*>(arg);
 
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     // // *** 注意：CLONE_SETTLS 已在 clone3 中设置 FS 寄存器。
     // // 这里再次调用 arch_prctl 可能会是冗余的，但在某些环境中可能是必要的。
     // // 为了与原意图保持一致，我们保留 arch_prctl 调用。
@@ -268,6 +298,7 @@ extern "C" void __mythread_c_entry(void* arg) {
     //         syscall(SYS_arch_prctl, ARCH_SET_FS, tcb_ptr);
     //     }
     // }
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
 
     if (self_base && self_base->task_executor) {
         // 执行包装好的任务，它会在 C++ 侧完成结果的创建和赋值
@@ -315,8 +346,13 @@ inline typename myThread<Result_t>::managed_self_t myThread<Result_t>::create(Fu
         return managed_self_t();
     }
 
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     // 检查资源分配是否失败
     if (ptr->stack_base == nullptr || ptr->tls_base == nullptr) return managed_self_t();
+#else
+    // 检查资源分配是否失败 (自定义 TLS 已禁用)
+    if (ptr->stack_base == nullptr) return managed_self_t();
+#endif
     return ptr;
 }
 
@@ -339,7 +375,7 @@ bool myThread<Result_t>::start_thread() {
 
     // 生命周期托管至智能指针
     stack_base = std::shared_ptr<char>(static_cast<char*>(ptr1),
-                                       [](char* p) { munmap(p, TOTAL_STACK_SIZE); });
+                                      [](char* p) { munmap(p, TOTAL_STACK_SIZE); });
 
     auto stack_base__ = stack_base.get();
 
@@ -377,6 +413,7 @@ bool myThread<Result_t>::start_thread() {
     stack_top -= 8;
     *reinterpret_cast<void**>(stack_top) = reinterpret_cast<void*>(&__mythread_start_shim);
 
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     // 单独开辟, 和栈一块开辟容易相互干扰
     // --- 2. TLS/TCB 空间申请及初始化 ---
     void* ptr2 = mmap(nullptr, TLS_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
@@ -407,6 +444,7 @@ bool myThread<Result_t>::start_thread() {
     auto header = reinterpret_cast<struct tls_descriptor*>(tcb_start_ptr);
     header->tcb = tcb_start_ptr;
     header->dtv = nullptr;  // dtv 内核自己初始化
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
 
     // --- 3. clone3 系统调用 ---
     struct clone_args params;
@@ -414,20 +452,24 @@ bool myThread<Result_t>::start_thread() {
 
     params.flags = CLONE_VM |  // 与父进程共享虚拟内存（创建线程而非独立进程）
                    CLONE_FS |  // 与父进程共享文件系统信息（cwd、umask 等）
-                   CLONE_FILES |           // 与父进程共享文件描述符表
-                   CLONE_SIGHAND |         // 与父进程共享信号处理器
-                   CLONE_SYSVSEM |         // 与父进程共享 System V 信号量
+                   CLONE_FILES |        // 与父进程共享文件描述符表
+                   CLONE_SIGHAND |      // 与父进程共享信号处理器
+                   CLONE_SYSVSEM |      // 与父进程共享 System V 信号量
                    CLONE_CHILD_CLEARTID |  // 子线程退出时清除其线程 ID
-                   CLONE_THREAD |          // 告诉内核这是一个线程
-                   CLONE_SETTLS |          // 设置子线程的线程局部存储（TLS）
-                   //    CLONE_THREAD |  // 自动分配局部存储, 避免手动设置与内核
+                   CLONE_THREAD |       // 告诉内核这是一个线程
+#if MYTHREAD_ENABLE_CUSTOM_TLS
+                   CLONE_SETTLS |       // 设置子线程的线程局部存储（TLS）
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
+                   //     CLONE_THREAD |  // 自动分配局部存储, 避免手动设置与内核
                    CLONE_CHILD_SETTID;  // 轻量级进程启动时将其ID写入child_tid
 
     params.stack = reinterpret_cast<uint64_t>(stack_top);
     params.stack_size = STACK_SIZE;
     params.parent_tid = reinterpret_cast<uint64_t>(&tid);
     params.child_tid = reinterpret_cast<uint64_t>(&child_tid);
+#if MYTHREAD_ENABLE_CUSTOM_TLS
     params.tls = reinterpret_cast<uint64_t>(tcb_start_ptr);  // 逆向偏移寻址
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
     params.exit_signal = 0;
 
     auto ret = syscall(SYS_clone3, &params, sizeof(struct clone_args));
@@ -444,7 +486,9 @@ bool myThread<Result_t>::start_thread() {
     if (ret < 0) {
         // 调用失败, 致命错误
         stack_base.reset();
+#if MYTHREAD_ENABLE_CUSTOM_TLS
         tls_base.reset();
+#endif // MYTHREAD_ENABLE_CUSTOM_TLS
         // 打印错误信息
         fprintf(stderr, "Error: clone3 failed with errno %d\n", errno);
         return false;
