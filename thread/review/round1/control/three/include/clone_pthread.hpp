@@ -1,5 +1,6 @@
 #include <linux/futex.h>  //  FUTEX_WAIT 等宏
 #include <sched.h>        // clone
+#include <signal.h>       // kill
 #include <sys/mman.h>     // mmap
 #include <sys/syscall.h>  // 定义 SYS_* 常量
 #include <unistd.h>       // syscall
@@ -8,9 +9,9 @@
 #include <cstdio>       // fflush
 #include <cstring>      // memset
 #include <format>       // std::format
-#include <functional>   // 函数对象
 #include <iostream>     // std::cerr
 #include <memory>       // 智能指针
+#include <tuple>        // 给lambda实现可变参数完美转发
 #include <type_traits>  // 类型萃取
 
 #if defined(__GLIBCXX__)
@@ -25,13 +26,38 @@ enum {
 
 class myThreadBase {
    protected:
+    // function 所拷贝的函数对象必须要能够拷贝
+    // 但很多时候, 函数对象往往因为各种各样的原因, 不能拷贝
+    // 为此, 我们不使用function作为底层调用对象, 而是手写一个可拷贝的类
+
+    // 基类承接子类指针, 统一调用对象指针类型
+    struct CallableBase {
+        virtual void call() = 0;
+        virtual ~CallableBase() = default;
+    };
+
+    // 子类利用多态, 实现任务的真正调用
+    template <typename F>
+    struct CallableImpl : CallableBase {
+        F f;
+        CallableImpl(F&& f_) : f(std::move(f_)) {}
+        void call() override {
+            f();
+        }
+    };
+
     using mem_ptr_t = std::shared_ptr<char>;
     using lwp_t = ::pid_t;  // 去全局域里找pid
-    using task_t = std::function<void()>;
+
+    // unique_ptr 明确生命周期控制权, 防止乱拷贝执行流混乱, 资源释放异常
+    using task_t = std::unique_ptr<CallableBase>;
 
    public:
     myThreadBase() = default;
-    ~myThreadBase() = default;
+    ~myThreadBase() {
+        // 终止创建的线程
+        if (_tid != 0) kill(_tid, SIGKILL);
+    };
 
     bool __start_thread() {
         // 栈及守护页空间申请
@@ -76,20 +102,20 @@ class myThreadBase {
                     CLONE_SYSVSEM |         // 与主线程共享 System V 信号量
                     CLONE_CHILD_CLEARTID |  // 子线程退出时清除其线程 ID
                     CLONE_THREAD |          // 把子线程放进主线程所在线程组
-                    CLONE_CHILD_SETTID;     // 把子线程ID写入_tid
+                    CLONE_PARENT_SETTID |  // 把子线程id写到clone第五个参数指向的控件
+                    CLONE_CHILD_SETTID;  // 当子线程退出时, 将clone第七个参数指向的空间写为零
 
-        int ret = ::clone(&myThreadBase::thread_entry,  // clone出的轻量级进程函数入口
-                          stack_bottom,                 // 栈底地址
-                          flags,                        // 行为描述符
-                          this,                         // 入口函数参数
-                          &_tid,                        // 新轻量级进程ID回写
-                          &_tid  // 轻量级进程退出时回写重新置为0
+        int ret = ::clone(
+            &myThreadBase::thread_entry,  // clone出的轻量级进程函数入口
+            stack_bottom,                 // 栈底地址
+            flags,                        // 行为描述符
+            this,                         // 入口函数参数
+            &_tid,                        // 新轻量级进程ID回写
+            nullptr,  // 不设置局部存储的话, 此处使用 nullptr 代表标准库自行创建并配置局部存储
+            &_tid     // 轻量级进程退出时回写重新置为0
         );
 
-        if (ret > 0) {
-            // 确保内核构造成功后应用层再返回, 自旋锁
-            while (_tid == 0) sched_yield();
-        } else {
+        if (ret < 0) {
             // 调用出错
             perror("clone failed: ");
             _stack.reset();
@@ -105,7 +131,6 @@ class myThreadBase {
 
         // 为零, 说明子线程已经结束 直接汇合
         if (expected == 0) return true;
-
         while (true) {
             // 使用clone 添加 CLONE_CHILD_CLEARTID时, 为内核种下如下事件
             // 当child_tid与预期值expected不相同时, 触发事件
@@ -134,18 +159,19 @@ class myThreadBase {
         return false;
     };
 
-    void __setTask(task_t&& task) {
-        _task = task;
-    }
+    // 模版函数支持更多类型函数对象的适配
+    template <typename F>
+    void __setTask(F&& task) {
+        _task = std::make_unique<CallableImpl<F>>(std::forward<F>(task));
+    };
 
    private:
     void thread_task() {
-        if (_task != nullptr) _task();
+        if (_task) _task->call();
     }
 
     static int thread_entry(void* arg) {
         auto me = static_cast<myThreadBase*>(arg);
-
         // 执行任务
         try {
             me->thread_task();
@@ -170,10 +196,7 @@ class myThreadBase {
         std::cout.flush();
         std::cerr.flush();
 
-        _exit(0);
-
-        // 实际上不会来到这里
-        // 这里写是为了让语法分析器不报警
+        // 函数结束, 这个线程也就结束了
         return 0;
     }
 
@@ -191,7 +214,6 @@ class myThread : public myThreadBase {
    public:
     using mem_ptr_t = myThreadBase::mem_ptr_t;
     using lwp_t = myThreadBase::lwp_t;
-    using task_t = myThreadBase::task_t;
 
     using self_t = myThread<result_t>;
     using self_ptr_t = std::shared_ptr<self_t>;      // 托管自身的智能指针
@@ -202,7 +224,7 @@ class myThread : public myThreadBase {
     template <typename Func, typename... Args>
     static self_ptr_t create(Func&& func, Args&&... args) {
         // 构造函数负责构造任务
-        auto ptr = self_ptr_t(new self_t(func, args...));
+        auto ptr = self_ptr_t(new self_t(std::forward<Func>(func), std::forward<Args>(args)...));
         // myThreadBase::start_thread 负责启动
         if (ptr->myThreadBase::__start_thread())
             return ptr;
@@ -220,17 +242,23 @@ class myThread : public myThreadBase {
 
     myThread(const myThread&) = delete;
     myThread& operator=(const myThread&) = delete;
-    myThread(myThread&&) = default;
-    myThread& operator=(myThread&&) = default;
+    myThread(myThread&&) = delete;
+    myThread& operator=(myThread&&) = delete;
     ~myThread() = default;
 
    private:
     template <typename Func, typename... Args>
     explicit myThread(Func&& func, Args&&... args) {
-        this->myThreadBase::__setTask(
-            [this, func = std::forward<Func>(func), ... args = std::forward<Args>(args)]() mutable {
-                _result = result_ptr_t(new result_t(func(args...)));
-            });
+        // lambda 不支持可变参数完美转发
+        auto args_tuple = std::make_tuple(std::forward<Args>(args)...);
+        auto fn = [this, func = std::forward<Func>(func),
+                   args_tuple = std::move(args_tuple)]() mutable {
+            // std::apply 可以以完美转发的形式展开参数并交给func调用
+            result_t result = std::apply(func, std::move(args_tuple));
+            this->_result = result_ptr_t(new result_t(result));
+        };
+
+        this->myThreadBase::__setTask(std::move(fn));
     };
 
    private:
@@ -242,10 +270,9 @@ struct thread_void_result {};
 
 template <>
 class myThread<void> : public myThreadBase {
-    public:
+   public:
     using mem_ptr_t = myThreadBase::mem_ptr_t;
     using lwp_t = myThreadBase::lwp_t;
-    using task_t = myThreadBase::task_t;
 
     using self_t = myThread<void>;
     using self_ptr_t = std::shared_ptr<self_t>;  // 托管自身的智能指针
@@ -255,27 +282,25 @@ class myThread<void> : public myThreadBase {
     using delegate_t = myThread<result_t>;
     using delegate_ptr_t = std::shared_ptr<delegate_t>;
 
-
-public:    
+   public:
     myThread(const myThread&) = delete;
     myThread& operator=(const myThread&) = delete;
-    myThread(myThread&&) = default;
-    myThread& operator=(myThread&&) = default;
+    myThread(myThread&&) = delete;
+    myThread& operator=(myThread&&) = delete;
     ~myThread() = default;
 
     template <typename Func, typename... Args>
     static self_ptr_t create(Func&& func, Args&&... args) {
         // 包装任务函数, 让它看上去就像平常的, 会返回值的一样
-        auto user_task = [func = std::forward<Func>(func),
-                          ... args = std::forward<Args>(args)]() mutable { return func(args...); };
-
-        auto delegate_task = [user_task = std::move(user_task)]() mutable {
-            user_task();
+        auto args_tuple = std::make_tuple(std::forward<Args>(args)...);
+        auto fn = [func = std::forward<Func>(func), args_tuple = std::move(args_tuple)]() mutable {
+            // std::apply 可以以完美转发的形式展开参数并交给func调用
+            std::apply(func, std::move(args_tuple));
             return result_t{};
         };
 
         // 委托至delegate_ptr_t对象进行实际构造
-        auto delegate = delegate_t::create(std::move(delegate_task));
+        auto delegate = delegate_t::create(std::move(fn));
 
         if (!delegate) return {};
 
