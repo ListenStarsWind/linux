@@ -1,4 +1,9 @@
-#include <format>
+// 不用管, 兼容性宏, 不带不一定能编译过去
+#define _LIBCPP_DISABLE_PARALLEL_ALGORITHMS
+#define _LIBCPP_DISABLE_OPTIONAL_CONCEPTS
+
+#define _LIBCPP_DISABLE_NEW_DELETE_OPERATORS
+#include <boost/format.hpp>
 #include <random>
 #include <string>
 
@@ -25,7 +30,7 @@ struct task {
 
         // 编译表达式
         if (!_parser.compile(_expression, expression)) {
-            _error = std::format("编译错误: {}\n", _parser.error());
+            // _error = (boost::format("编译错误: %1%\n") % _parser.error()).str();
             return {};
         }
 
@@ -57,9 +62,13 @@ struct task {
 
 struct user_task {
     task _t;
-    user_task(const task& t) : _t(t) {}
+    user_task(task&& t) : _t(t) {}
     explicit operator std::string() const {
         return static_cast<std::string>(_t);
+    }
+    void operator()() {
+        _t();
+        std::cout << static_cast<std::string>(_t);
     }
 };
 
@@ -68,9 +77,9 @@ using queue_t = blocking_queue<::function>;
 void* producer(void* p) {
     auto queue = static_cast<queue_t*>(p);
 
-    static thread_local std::mt19937_64 gen(std::random_device{}());
-    static thread_local std::uniform_real_distribution<double> value_dist(-1e150, 1e150);
-    static thread_local std::uniform_int_distribution<int> opid_dist(0, 3);
+    std::mt19937_64 gen(std::random_device{}());
+    std::uniform_real_distribution<double> value_dist(-1e3, 1e3);
+    std::uniform_int_distribution<int> opid_dist(0, 3);
     static thread_local const char ops[] = {'+', '-', '*', '/'};
 
     while (true) {
@@ -79,13 +88,9 @@ void* producer(void* p) {
         std::string right = std::to_string(value_dist(gen));
         char op = ops[opid_dist(gen)];
         task t(left + op + right);
-
-        auto task = [t = std::move(t)]() mutable {
-            t();
-            std::cout << static_cast<std::string>(t);
-        };
-
+        user_task task(std::move(t));
         queue->emplace(task);
+        sleep(1);
     }
     return nullptr;
 }

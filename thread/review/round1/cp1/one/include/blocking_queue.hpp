@@ -4,10 +4,10 @@
 #include <pthread.h>
 #include <unistd.h>
 
-#include <format>
 #include <iostream>
 #include <memory>
 #include <queue>
+#include <boost/format.hpp>
 
 struct lock_guard {
     pthread_mutex_t* _mutex;
@@ -68,8 +68,7 @@ class blocking_queue {
             pthread_cond_wait(_not_full.get(), _mutex.get());
         }
         _queue->emplace(std::forward<Args>(args)...);
-        std::cout << std::format("生产了一份新的数据: {}", static_cast<std::string>(_queue.back()))
-                  << std::endl;
+        std::cout << (boost::format("生产了一份新的数据: %1%\n") % static_cast<std::string>(_queue->back())).str();
 
         // 唤醒一个或一批线程
 
@@ -100,9 +99,9 @@ class blocking_queue {
             {
                 pthread_cond_wait(_not_empty.get(), _mutex.get());
             }
-            result = _queue->front();
+            result = std::move(_queue->front());
             _queue->pop();
-            std::cout << std::format("获取了一份新的数据: {}", result) << std::endl;
+            std::cout << (boost::format("获取了一份新的数据: %1%\n") % static_cast<std::string>(result)).str();
 
 #ifdef USE_CLASSIC_COND_SCHEME
             pthread_cond_signal(_not_full.get());

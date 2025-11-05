@@ -26,6 +26,7 @@ struct call_back : public call_back_base {
 
 struct function {
     using task_base_ptr_t = std::unique_ptr<call_back_base>;
+    using self_t = ::function;
     task_base_ptr_t _task;
 
     function() = default;
@@ -33,10 +34,17 @@ struct function {
     template <typename Func>
     function(Func&& task_) : _task(std::make_unique<call_back<Func>>(std::forward<Func>(task_))) {}
 
-    
+    template <typename Func>
+    void reset(Func&& task_) {
+        _task = std::make_unique<call_back<Func>>(std::forward<Func>(task_));
+    }
 
     void operator()() {
         _task->call();
+    }
+
+    void swap(self_t& that) {
+        _task.swap(that._task);
     }
 
     explicit operator std::string() const {
