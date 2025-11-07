@@ -8,24 +8,25 @@
 #include "task.hpp"
 #include "ring_queue.hpp"
 
-using queue_t = ring_queue<double>;
+using queue_t = ring_queue<task>;
 using hash_t = std::unordered_map<pthread_t, int>;
-
-using dist_t = std::uniform_real_distribution<double>;
-using random_t = std::function<double(void)>;
-
-struct producer_args {
-    random_t* _random;
-    queue_t* _queue;
-};
 
 void* producer(void* p) {
     pthread_detach(pthread_self());
-    auto args = static_cast<producer_args*>(p);
+    std::mt19937_64 gen(std::random_device{}());
+    std::uniform_real_distribution<double> value_dist(-1e3, 1e3);
+    std::uniform_int_distribution<int> opid_dist(0, 3);
+    static thread_local const char ops[] = {'+', '-', '*', '/'};
+
+    auto queue = static_cast<queue_t*>(p);
     while (true) {
-        auto val = args->_random->operator()();
-        args->_queue->push(val);
+        // 生成两个随机数和一个运算符
+        std::string left = std::to_string(value_dist(gen));
+        std::string right = std::to_string(value_dist(gen));
+        char op = ops[opid_dist(gen)];
+        queue->push(left + op + right);
         sleep(1);
+
     }
 
     return nullptr;
@@ -42,29 +43,24 @@ void* consumer(void* p) {
 }
 
 int main() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<double> dist(-1e3, 1e3);
-
     hash_t producers;
     hash_t consumers;
 
-    random_t random = [&gen, &dist]() { return dist(gen); };
     queue_t queue(
         5,
-        [&producers](const double& val) {
+        [&producers](task& val) {
             std::cout << std::format("\033[31m[producer-{}]info$ push: {}\033[0m\n",
-                                     producers[pthread_self()], val);
+                                     producers[pthread_self()], static_cast<std::string>(val));
         },
-        [&consumers](const double& val) {
+        [&consumers](task& val) {
+            val();
             std::cout << std::format("\033[32m[consumer-{}]info$ pop : {}\033[0m\n",
-                                     consumers[pthread_self()], val);
+                                     consumers[pthread_self()], static_cast<std::string>(val));
         });
 
-    producer_args pargs{&random, &queue};
     for (int i = 1; i <= 9; ++i) {
         pthread_t p;
-        pthread_create(&p, nullptr, producer, &pargs);
+        pthread_create(&p, nullptr, producer, &queue);
         producers.emplace(p, i);
     }
     for (int i = 1; i <= 7; ++i) {

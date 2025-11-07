@@ -76,7 +76,7 @@ class ring_queue {
         sem_post(sum.get());
     }
 
-    static void empty_log(const data_base_t&) {};
+    static void empty_log(data_base_t&) {};
 
    private:
     size_t _capa;

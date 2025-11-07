@@ -7,16 +7,16 @@ class data_guard {
     using self_t = data_guard<data_t>;
 
    public:
-    using function_t = std::function<void(const data_t&)>;
+    using function_t = std::function<void(data_t&)>;
     using data_ptr_t = std::unique_ptr<data_t>;
 
     data_guard() = default;
 
     template <typename InputFunc, typename OutputFunc>
     data_guard(
-        InputFunc&& in_func = [](const data_t&) {}, OutputFunc&& out_func = [](const data_t&) {})
+        InputFunc&& in_func = [](data_t&) {}, OutputFunc&& out_func = [](data_t&) {})
         : _input(std::forward<InputFunc>(in_func)), _output(std::forward<OutputFunc>(out_func)) {}
-        
+
     data_guard(self_t&& other) {
         _data = std::move(other._data);
         _input = std::move(other._input);
