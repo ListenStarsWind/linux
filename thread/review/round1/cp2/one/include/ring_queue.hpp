@@ -25,17 +25,20 @@ class ring_queue {
    public:
     ring_queue(size_t capa, function_t in_log = empty_log, function_t out_log = empty_log)
         : _capa(capa),
-          _queue(_capa, data_t(in_log, out_log)),
           _push_idx(0),
           _pop_idx(0),
-          _space_sum({}, ::sem_destroy),
-          _data_sum({}, ::sem_destroy),
-          _push_mutex({}, ::pthread_mutex_destroy),
-          _pop_mutex({}, ::pthread_mutex_destroy) {
+          _space_sum(new sem_t, ::sem_destroy),
+          _data_sum(new sem_t, ::sem_destroy),
+          _push_mutex(new mutex_t, ::pthread_mutex_destroy),
+          _pop_mutex(new mutex_t, ::pthread_mutex_destroy) {
         sem_init(_space_sum.get(), 0, _capa);
         sem_init(_data_sum.get(), 0, 0);
         pthread_mutex_init(_push_mutex.get(), nullptr);
         pthread_mutex_init(_pop_mutex.get(), nullptr);
+        _queue.reserve(_capa);
+        for (size_t i = 0; i <= _capa; ++i) {
+            _queue.emplace_back(in_log, out_log);
+        }
     }
 
     ~ring_queue() = default;

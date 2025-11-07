@@ -1,6 +1,5 @@
+#include <functional>
 #include <memory>
-
-#include "move_only_function.hpp"
 
 template <typename T>
 class data_guard {
@@ -8,7 +7,7 @@ class data_guard {
     using self_t = data_guard<data_t>;
 
    public:
-    using function_t = move_only_function<void(const data_t&)>;
+    using function_t = std::function<void(const data_t&)>;
     using data_ptr_t = std::unique_ptr<data_t>;
 
     data_guard() = default;
@@ -17,14 +16,12 @@ class data_guard {
     data_guard(
         InputFunc&& in_func = [](const data_t&) {}, OutputFunc&& out_func = [](const data_t&) {})
         : _input(std::forward<InputFunc>(in_func)), _output(std::forward<OutputFunc>(out_func)) {}
-
-    template <typename... Args, typename InputFunc, typename OutputFunc>
-    data_guard(
-        Args&&... args, InputFunc&& in_func = [](const data_t&) {},
-        OutputFunc&& out_func = [](const data_t&) {})
-        : _data(std::make_unique<data_t>(std::forward<Args>(args)...)),
-          _input(std::forward<InputFunc>(in_func)),
-          _output(std::forward<OutputFunc>(out_func)) {}
+        
+    data_guard(self_t&& other) {
+        _data = std::move(other._data);
+        _input = std::move(other._input);
+        _output = std::move(other._output);
+    }
 
     ~data_guard() = default;
 
