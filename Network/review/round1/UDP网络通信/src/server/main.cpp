@@ -3,10 +3,11 @@
 
 #include <vector>
 
-std::string func(const std::string& buffer)
+std::string func(size_t id, const std::string& buffer)
 {
+    (void)id;
     BOOST_LOG_TRIVIAL(info) << std::format("接收到一条消息: {}", buffer);
-    std::string result = std::format("回应: {}", buffer);
+    std::string result = std::format("<回应 {}>", buffer);
     return result;
 }
 
@@ -66,6 +67,6 @@ int main(int argc, char* argv[]) {
     }
 
     udp_server server(port);
-    server.run(ExcuteCommand);
+    server.run(func);
     return 0;
 }
