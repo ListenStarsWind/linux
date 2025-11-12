@@ -27,9 +27,13 @@ class tcp_protocol {
 
     virtual ~tcp_protocol() = default;
 
-     virtual void run() {
+    virtual void run() {
         start_running();
         stop_running();
+    }
+
+    void clean() {
+        _proto_socket.reset();
     }
 
    private:
@@ -67,7 +71,18 @@ class tcp_protocol {
                 << std::format("描述符为{}的套接字设置监听状态失败: {}", socket, strerror(errno));
             exit(errno);
         }
-        BOOST_LOG_TRIVIAL(error) << std::format("描述符为{}的套接字设置监听状态成功", socket);
+        BOOST_LOG_TRIVIAL(info) << std::format("描述符为{}的套接字设置监听状态成功", socket);
+    }
+
+    static socket_t accept(socket_t socket, sockaddr_t& user_sockaddr) {
+        socklen_t len = static_cast<socklen_t>(sizeof(user_sockaddr));
+        auto user_socket = ::accept(socket, reinterpret_cast<::sockaddr*>(&user_sockaddr), &len);
+        if (user_socket < 0) {
+            BOOST_LOG_TRIVIAL(warning) << std::format("接触到一个异常的用户连接");
+        } else {
+            BOOST_LOG_TRIVIAL(info) << std::format("接收到一个描述符为{}的用户连接", user_socket);
+        }
+        return user_socket;
     }
 
     static socket_t socket_init() {
@@ -77,6 +92,13 @@ class tcp_protocol {
             exit(errno);
         } else {
             BOOST_LOG_TRIVIAL(info) << std::format("套接字打开成功, 文件描述符为: {}", socket);
+            int optval = 1;
+            if (::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+                BOOST_LOG_TRIVIAL(error)
+                    << std::format("设置 套接字复用失败: {}", strerror(errno));
+                ::close(socket);
+                exit(errno);
+            }
         }
         return socket;
     }
@@ -112,7 +134,7 @@ class tcp_protocol {
         BOOST_LOG_TRIVIAL(info) << std::format("对于{}套接字描述符已经绑定成功", socket);
     }
 
-    static void connect(socket_t socket, const addr_t& addr = tcp_protocol::_server_addr,
+    static bool connect(socket_t socket, const addr_t& addr = tcp_protocol::_server_addr,
                         port_t port = tcp_protocol::_server_port) {
         sockaddr_t sockaddr;
         tcp_protocol::sockaddr_in_init(sockaddr, addr, port);
@@ -121,9 +143,10 @@ class tcp_protocol {
         if (ret < 0) {
             BOOST_LOG_TRIVIAL(error) << std::format("对于服务器\"{}:{}\"的连接出现了错误: {}", addr,
                                                     port, strerror(errno));
-            exit(errno);
+            return false;
         }
-        BOOST_LOG_TRIVIAL(error) << std::format("服务器\"{}:{}\"已经获取了我方连接", addr, port);
+        BOOST_LOG_TRIVIAL(info) << std::format("服务器\"{}:{}\"已经获取了我方连接", addr, port);
+        return true;
     }
 
    private:

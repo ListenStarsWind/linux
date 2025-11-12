@@ -5,7 +5,17 @@ class tcp_client : public tcp_protocol {
     public:
     tcp_client(const addr_t& server_addr = tcp_protocol::_server_addr,
                port_t server_port = tcp_protocol::_server_port) {
-        tcp_protocol::connect(get_proto_socket(), server_addr, server_port);
+
+        int reconnection= 10;
+        while(reconnection--)
+        {
+            bool ret = tcp_protocol::connect(get_proto_socket(), server_addr, server_port);
+            if(ret == true) return;
+            BOOST_LOG_TRIVIAL(info) << std::format("正在尝试重新连接至服务器");
+            ::sleep(1);
+        }
+        BOOST_LOG_TRIVIAL(error) << std::format("重连的次数过多, 请等待网络好转后重试");
+        ::exit(errno);
     }
 
     ~tcp_client() override = default;
