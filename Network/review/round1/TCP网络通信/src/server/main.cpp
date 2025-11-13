@@ -1,7 +1,9 @@
 #include "boost_log.hpp"
+#include "server/daemon.hpp"
 #include "server/tcp_server.hpp"
 
 int main(int argc, char* argv[]) {
+    daemon();
     init_logging();
 
     std::string addr = "0.0.0.0";
@@ -15,6 +17,6 @@ int main(int argc, char* argv[]) {
 
     tcp_server server(addr, port);
     server.run();
-    
+
     return 0;
 }

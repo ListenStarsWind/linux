@@ -6,11 +6,11 @@ project(demo LANGUAGES CXX)
 if (DEFINED ENV{CXX})
     set(CMAKE_CXX_COMPILER $ENV{CXX})
 else()
-    set(CMAKE_CXX_COMPILER clang++-18)
+    set(CMAKE_CXX_COMPILER clang++-21)
 endif()
 
 if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "必须使用 Clang 编译器！请运行: export CXX=clang++-18")
+    message(FATAL_ERROR "必须使用 Clang 编译器！请运行: export CXX=clang++-21")
 endif()
 
 # ================== 基础设置 ==================

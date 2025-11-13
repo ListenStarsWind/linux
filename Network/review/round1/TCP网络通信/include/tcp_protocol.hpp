@@ -21,9 +21,7 @@ class tcp_protocol {
 
    public:
     tcp_protocol()
-        : _is_running(false), _proto_socket(new socket_t, &tcp_protocol::socket_destroy) {
-        *_proto_socket = tcp_protocol::socket_init();
-    }
+        : _is_running(false), _proto_socket(new socket_t, &tcp_protocol::socket_destroy) {}
 
     virtual ~tcp_protocol() = default;
 
@@ -39,12 +37,24 @@ class tcp_protocol {
    private:
     static void socket_destroy(socket_t* p) {
         if (p != nullptr) {
-            close(*p);
+            if (*p != 0) {
+                close(*p);
+            }
             delete p;
         }
     }
 
    protected:
+    // 这两个接口是给客户端控制短连接时机用的
+    void close_proto_socket() {
+        close(*_proto_socket);
+        *_proto_socket = 0;
+    }
+
+    void reset_proto_socket() {
+        *_proto_socket = tcp_protocol::socket_init();
+    }
+
     // 以只读形式暴露原初套接字描述符
     socket_t get_proto_socket() {
         return *_proto_socket;
@@ -55,12 +65,12 @@ class tcp_protocol {
     }
 
     void start_running() {
-        BOOST_LOG_TRIVIAL(info) << std::format("程序正在运行, 已经进入主循环");
+        BOOST_LOG_TRIVIAL(info) << std::format("程序正在运行, 已经进入网络IO主逻辑");
         _is_running = true;
     }
 
     void stop_running() {
-        BOOST_LOG_TRIVIAL(info) << std::format("程序停止运行, 结束主循环");
+        BOOST_LOG_TRIVIAL(info) << std::format("程序退出IO主逻辑");
         _is_running = false;
     }
 
@@ -94,8 +104,7 @@ class tcp_protocol {
             BOOST_LOG_TRIVIAL(info) << std::format("套接字打开成功, 文件描述符为: {}", socket);
             int optval = 1;
             if (::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-                BOOST_LOG_TRIVIAL(error)
-                    << std::format("设置 套接字复用失败: {}", strerror(errno));
+                BOOST_LOG_TRIVIAL(error) << std::format("设置 套接字复用失败: {}", strerror(errno));
                 ::close(socket);
                 exit(errno);
             }

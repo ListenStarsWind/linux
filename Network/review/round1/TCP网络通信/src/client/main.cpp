@@ -13,6 +13,8 @@ int main(int argc, char* argv[]) {
     }
     BOOST_LOG_TRIVIAL(info) << std::format("服务端地址确认: \"{}:{}\"", server_addr, server_port);
     tcp_client client(server_addr, server_port);
-    client.run();
+    while (true) {
+        client.run();
+    }
     return 0;
 }
