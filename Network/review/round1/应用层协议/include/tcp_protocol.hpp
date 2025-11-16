@@ -10,6 +10,7 @@
 #include <format>
 #include <memory>  // 引入智能指针
 #include <string>
+#include <iostream>
 
 class tcp_protocol {
    protected:
@@ -18,6 +19,8 @@ class tcp_protocol {
     using socket_t = int;
     using socket_ptr_t = std::unique_ptr<socket_t, void (*)(socket_t*)>;
     using sockaddr_t = ::sockaddr_in;
+    using istream = std::istream;
+    using ostream = std::ostream;
 
    public:
     tcp_protocol()
@@ -25,7 +28,9 @@ class tcp_protocol {
 
     virtual ~tcp_protocol() = default;
 
-    virtual void run() {
+    virtual void run(istream& in = std::cin, ostream& out = std::cout) {
+        (void)in;
+        (void)out;
         start_running();
         stop_running();
     }

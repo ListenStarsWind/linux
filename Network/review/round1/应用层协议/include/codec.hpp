@@ -18,7 +18,7 @@ class codec {
         return message;
     }
 
-static bool unpack(string& message, string* layout) {
+static bool unpack(string& message, string* payload) {
     // 找到报头结尾：长度字段 + CRLF
     auto header_end = message.find(codec::_delimiter);
     if (header_end == string::npos) return false;
@@ -26,7 +26,7 @@ static bool unpack(string& message, string* layout) {
     // 负载开始的位置
     auto payload_begin = header_end + codec::_delimiter.size();
 
-    BOOST_LOG_TRIVIAL(debug) << std::format("报文为: {}, pos:{}", message, header_end);
+    // BOOST_LOG_TRIVIAL(debug) << std::format("报文为: {}, pos:{}", message, header_end);
 
     // 解析报头里的长度字段
     auto payload_len = codec::stoi(message.substr(0, header_end));
@@ -40,12 +40,12 @@ static bool unpack(string& message, string* layout) {
     if (message.size() < packet_size) return false;
 
     // 截取负载
-    *layout = message.substr(payload_begin, payload_len);
+    *payload = message.substr(payload_begin, payload_len);
 
     // 移除一个完整报文
-    BOOST_LOG_TRIVIAL(debug) << std::format("处理前的报文:{}", message);
+    // BOOST_LOG_TRIVIAL(debug) << std::format("处理前的报文:{}", message);
     message.erase(0, packet_size);
-    BOOST_LOG_TRIVIAL(debug) << std::format("处理后的报文:{}", message);
+    // BOOST_LOG_TRIVIAL(debug) << std::format("处理后的报文:{}", message);
 
     return true;
 }

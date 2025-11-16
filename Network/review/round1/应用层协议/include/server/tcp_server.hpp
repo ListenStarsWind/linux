@@ -31,7 +31,9 @@ class tcp_server : public tcp_protocol {
 
     ~tcp_server() override = default;
 
-    void run() override {
+    void run(istream& in = std::cin, ostream& out = std::cout) override {
+        (void)in;
+        (void)out;
         sockaddr_t user_sockaddr;
         const socket_t listen_socket = get_proto_socket();
         start_running();
@@ -59,10 +61,21 @@ class tcp_server : public tcp_protocol {
                     BOOST_LOG_TRIVIAL(info) << std::format("用户发出了这样的消息: {}", buffer);
                     messages += buffer;
                     try {
-                        std::string echo = _call_back(messages);
-                        write(socket, echo.c_str(), echo.size());
+                        std::string echoes;
+                        std::string echo;
+                        do {
+                            echo.clear();
+                            echo = _call_back(messages);
+                            echoes += echo;
+                        } while (
+                            !echo.empty() &&
+                            !messages
+                                 .empty());  // echo 空意味着剩下的messages不足以构成一个完整的报文,
+                                             // 所以继续尝试读; messages空那就解析不了
+                        ::write(socket, echoes.c_str(), echoes.size());
                     } catch (...) {
-                        BOOST_LOG_TRIVIAL(error) << std::format("应用层出现了无法处理的错误, 已将该连接视为非法");
+                        BOOST_LOG_TRIVIAL(error)
+                            << std::format("应用层出现了无法处理的错误, 已将该连接视为非法");
                         ::close(socket);
                         return;
                     }
@@ -79,25 +92,6 @@ class tcp_server : public tcp_protocol {
         };
 
         _task_pool->push(t);
-    }
-
-    static void close_client() {
-        FILE* fp = popen("pidof -s demo_client", "r");
-        char buffer[32] = {0};
-        if (::fgets(buffer, sizeof(buffer), fp) == nullptr) {
-            BOOST_LOG_TRIVIAL(error) << std::format(
-                "这个机器上没有demo_client, 是误使用了close_client接口吗? "
-                "注意该接口仅仅是用来测试服务端对已经关闭的套接字进行写操作而可能触发的信号效果");
-            ::exit(0);
-        }
-
-        // 抹去末尾的换行符
-        buffer[::strlen(buffer) - 1] = '\0';
-
-        pid_t id = atoi(buffer);
-        ::kill(id, SIGUSR1);
-
-        ::pclose(fp);
     }
 
    private:

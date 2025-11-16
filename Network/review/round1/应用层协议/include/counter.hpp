@@ -47,7 +47,7 @@ class counter {
         }
         if (flag) throw std::invalid_argument("使用了不支持的操作符");
 
-        BOOST_LOG_TRIVIAL(debug) << std::format("x:{}, op:{}, y:{}", x, op, y);
+        // BOOST_LOG_TRIVIAL(debug) << std::format("x:{}, op:{}, y:{}", x, op, y);
         
         double x_, y_;
         char op_ = op[0];
@@ -126,7 +126,7 @@ class counter {
     bool _state;
     double _result;
 
-   private:
+   public:
     inline static const double inf = std::numeric_limits<double>::infinity();
     inline static const char _ops[4] = {'+', '-', '*', '/'};
     inline static const char _space = ' ';
