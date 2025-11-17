@@ -34,6 +34,16 @@ set(CMAKE_BUILD_TYPE Debug)           # 默认 Debug，后面可以覆盖
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# ←★ 新增：proto 源目录（仅存放 .proto）
+set(PROTO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/proto)
+
+# ←★ 新增：生成文件目录放构建树（不写入源码）
+set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${GENERATED_DIR})
+
+# ←★ 新增：是否启用 protobuf 机制
+option(USE_PROTOBUF "Use Protobuf instead of custom string codec" ON)
+
 # ==============================================================================
 # 4. 目录结构（请按此组织文件）
 #   demo/
@@ -56,7 +66,7 @@ file(GLOB SERVER_SOURCES CONFIGURE_DEPENDS
 file(GLOB SERVER_HEADERS CONFIGURE_DEPENDS
      "${INCLUDE_DIR}/server/*.h"
      "${INCLUDE_DIR}/server/*.hpp"
-      "${INCLUDE_DIR}/*.h"
+     "${INCLUDE_DIR}/*.h"
      "${INCLUDE_DIR}/*.hpp")
 
 # --------------------- 客户端源码 ---------------------
@@ -69,7 +79,7 @@ file(GLOB CLIENT_SOURCES CONFIGURE_DEPENDS
 file(GLOB CLIENT_HEADERS CONFIGURE_DEPENDS
      "${INCLUDE_DIR}/client/*.h"
      "${INCLUDE_DIR}/client/*.hpp"
-      "${INCLUDE_DIR}/*.h"
+     "${INCLUDE_DIR}/*.h"
      "${INCLUDE_DIR}/*.hpp")
 
 # ==============================================================================
@@ -88,11 +98,39 @@ endif()
 find_package(Threads REQUIRED)
 
 # ==============================================================================
+# 5.5 Protobuf 生成（新增）
+# ==============================================================================
+if (USE_PROTOBUF)
+    find_package(Protobuf REQUIRED)
+    message(STATUS "Protobuf version: ${Protobuf_VERSION}")
+
+    # 找到所有 .proto 文件
+    file(GLOB PROTO_FILES "${PROTO_DIR}/*.proto")
+
+    # 使用 protoc 将 *.proto → *.pb.h + *.pb.cc
+    protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS
+        ${PROTO_FILES}
+        PROTOC_OUT_DIR ${GENERATED_DIR}
+    )
+
+    message(STATUS "PROTO_FILES  : ${PROTO_FILES}")
+    message(STATUS "GENERATED_DIR: ${GENERATED_DIR}")
+endif()
+
+# ==============================================================================
 # 6. 公共配置函数（负责「编译选项 / 链接库 / 宏」）
 # ==============================================================================
 function(configure_common TARGET)
     # 头文件搜索路径
     target_include_directories(${TARGET} PRIVATE ${INCLUDE_DIR})
+
+    # 若启用 Protobuf → 增加 generated/ 为 include 目录
+    if (USE_PROTOBUF)
+        target_include_directories(${TARGET} PRIVATE ${GENERATED_DIR})
+        target_compile_definitions(${TARGET} PRIVATE USE_PROTOBUF)
+        target_sources(${TARGET} PRIVATE ${PROTO_SRCS} ${PROTO_HDRS})
+        target_link_libraries(${TARGET} PRIVATE protobuf::libprotobuf)
+    endif()
 
     # 编译宏
     target_compile_definitions(${TARGET} PRIVATE _GNU_SOURCE)
@@ -138,11 +176,9 @@ endfunction()
 # ==============================================================================
 # 7. 创建可执行目标
 # ==============================================================================
-# 服务端
 add_executable(${PROJECT_NAME}_server ${SERVER_SOURCES} ${SERVER_HEADERS})
 configure_common(${PROJECT_NAME}_server)
 
-# 客户端（名字加后缀防止冲突）
 add_executable(${PROJECT_NAME}_client ${CLIENT_SOURCES} ${CLIENT_HEADERS})
 configure_common(${PROJECT_NAME}_client)
 
@@ -152,6 +188,8 @@ configure_common(${PROJECT_NAME}_client)
 message(STATUS "============================================ 编译信息 ============================================")
 message(STATUS "源码根目录      : ${SOURCE_DIR}")
 message(STATUS "头文件根目录    : ${INCLUDE_DIR}")
+message(STATUS "proto目录       : ${PROTO_DIR}")
+message(STATUS "生成目录        : ${GENERATED_DIR}")
 message(STATUS "编译器          : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ 标准库      : libc++")
 message(STATUS "C++ 标准        : C++${CMAKE_CXX_STANDARD}")
@@ -161,7 +199,6 @@ message(STATUS "compile_commands: ${CMAKE_EXPORT_COMPILE_COMMANDS}")
 
 if (ENABLE_BOOST)
     message(STATUS "Boost 支持      : 已启用（版本 ${Boost_VERSION}）")
-    message(STATUS "Boost 路径      : ${Boost_INCLUDE_DIRS}")
 else()
     message(STATUS "Boost 支持      : 未启用")
 endif()
@@ -170,6 +207,12 @@ if (ENABLE_TSAN)
     message(STATUS "ThreadSanitizer : 已启用")
 else()
     message(STATUS "ThreadSanitizer : 未启用")
+endif()
+
+if (USE_PROTOBUF)
+    message(STATUS "Protobuf 支持   : 已启用")
+else()
+    message(STATUS "Protobuf 支持   : 未启用（使用字符串打包方式）")
 endif()
 
 message(STATUS "生成的可执行文件:")
