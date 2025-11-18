@@ -5,19 +5,23 @@
 #include <stdexcept>  //std::invalid_argument
 #include <string>
 
+#ifdef USE_PROTOBUF
+#include <vector>
+#endif
+
 class counter {
-    using string = std::string;
+    using buffer = std::string;
     using self_t = counter;
 
    public:
     counter() : _state(false) {}
     counter(double x, char op, double y) : _x(x), _op(op), _y(y), _state(true) {}
 
-    string to_string() {
+    buffer to_bytes() {
         if (_state == false) {
             BOOST_LOG_TRIVIAL(warning) << std::format("正在对未初始化的对象序列化");
         }
-        string temp;
+        buffer temp;
         temp += std::to_string(_x);
         temp += counter::_space;
         temp += _op;

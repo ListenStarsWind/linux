@@ -3,12 +3,17 @@
 #include <boost/log/trivial.hpp>  // 引入Boost全局日志宏
 #include <string>
 #ifdef USE_PROTOBUF
-#include "counter.pb.h"
+#include <vector>
 #endif
 #include <format>
 
 class codec {
+
+#ifndef USE_PROTOBUF
     using buffer = std::string;
+    #else
+    using buffer = std::vector<char>;
+    #endif
 
    public:
     static buffer pack(const buffer& payload) {
@@ -44,11 +49,14 @@ class codec {
         if (message.size() < packet_size) return false;
 
         // 截取负载
-        *payload = message.substr(payload_begin, payload_len);
+        payload->clear();
+        char* begin = message.data() + payload_begin;
+        char* end = begin + payload_len;
+        payload->insert(payload->end(), begin, end);
 
         // 移除一个完整报文
         // BOOST_LOG_TRIVIAL(debug) << std::format("处理前的报文:{}", message);
-        message.erase(0, packet_size);
+        codec::erase_front(message, packet_size);
         // BOOST_LOG_TRIVIAL(debug) << std::format("处理后的报文:{}", message);
 
         return true;
@@ -83,6 +91,11 @@ class codec {
     {
         return b.substr(start, size);
     }
+
+    static void erase_front(buffer& b, size_t len)
+    {
+        b.erase(0, len);
+    }
 #else
     template <class T>
     static void append(buffer& dest, const T& src) {
@@ -102,7 +115,7 @@ class codec {
 
         size_t start = 0;
         size_t end = b.size() - target.size();
-        for (size_t i = start, i <= end; ++i) {
+        for (size_t i = start; i <= end; ++i) {
             bool match = true;
             for (size_t j = 0; j < target.size(); ++j) {
                 if (b[i + j] != target[j]) {
@@ -112,6 +125,7 @@ class codec {
             }
             if (match) return i;
         }
+         return codec::npos;
     }
 
     static std::string substr(const buffer& b, size_t start, size_t size)
@@ -119,6 +133,14 @@ class codec {
         char* begin = b.data() + start;
         char* end = begin + size;
         return {begin, end};
+    }
+    
+    static void erase_front(buffer& b, size_t len)
+    {
+        char* begin = b.data() + len;
+        char* end = b.data() + b.size();
+        buffer temp{begin, end};
+        b.swap(temp);
     }
 #endif
 
