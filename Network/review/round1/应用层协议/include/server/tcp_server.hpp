@@ -54,12 +54,14 @@ class tcp_server : public tcp_protocol {
             (void)user_ip;
             char buffer[1024] = {0};
             std::string messages;
+            std::string temp;
             while (true) {
-                ssize_t len = ::read(socket, buffer, sizeof(buffer) - 1);
+                ssize_t len = ::read(socket, buffer, sizeof(buffer));
                 if (len > 0) {
-                    buffer[len] = '\0';
                     BOOST_LOG_TRIVIAL(info) << std::format("用户发出了这样的消息: {}", buffer);
-                    messages += buffer;
+                    temp.clear();
+                    temp.append(buffer, len);
+                    messages += temp;
                     try {
                         std::string echoes;
                         std::string echo;

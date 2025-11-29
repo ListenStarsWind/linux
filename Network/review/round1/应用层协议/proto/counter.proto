@@ -1,9 +1,0 @@
-syntax = "proto3";
-
-package app;
-
-message Counter {
-    double x = 1;   // 操作数1
-    double y = 2;   // 操作数2
-    string op = 3;  // 操作符，只允许 "+", "-", "*", "/" 中之一
-}

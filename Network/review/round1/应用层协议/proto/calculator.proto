@@ -1,0 +1,43 @@
+edition = "2024";
+
+package calc;
+
+// ===============================
+// 1. 运算请求（REQUEST）
+// ===============================
+message CalcRequest {
+  double left = 1;
+  string op   = 2;   // "+", "-", "*", "/"
+  double right = 3;
+}
+
+// ===============================
+// 2. 运算应答（RESPONSE）
+// ===============================
+message CalcResponse {
+
+  enum StatusCode {
+    SUCCESS          = 0; // 一切正常，包括除零（返回 ±inf）
+    INVALID_OPERATOR = 1; // 操作符不存在
+    OVERFLOW         = 2; // 运算结果溢出（加减乘除均可）
+  }
+
+  double result = 1;         // 包含 +inf, -inf
+  StatusCode status_code = 2;
+  string message = 3;        // 对错误附加说明
+}
+
+// ===============================
+// 3. 会话层错误（ERROR）
+// ===============================
+message CalcError {
+
+  enum ErrorCode {
+    UNKNOWN_ERROR            = 0;
+    REQUEST_DESERIALIZE_FAIL = 1;
+    RESPONSE_SERIALIZE_FAIL  = 2;
+  }
+
+  ErrorCode session_code = 1;
+  string description = 2;
+}

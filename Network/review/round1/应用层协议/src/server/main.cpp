@@ -1,6 +1,6 @@
 #include "boost_log.hpp"
+#include "server/SessionHandler .hpp"
 #include "server/tcp_server.hpp"
-#include "server/calculator.hpp"
 
 int main(int argc, char* argv[]) {
     init_logging();
@@ -14,9 +14,11 @@ int main(int argc, char* argv[]) {
     }
     BOOST_LOG_TRIVIAL(info) << std::format("服务器地址确认: \"{}:{}\"", addr, port);
 
-    calculator call_back;
+    SessionHandler call_back;
     tcp_server server(call_back, addr, port);
     server.run();
+
+    return 0;
 
     return 0;
 }

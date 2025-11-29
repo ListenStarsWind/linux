@@ -26,10 +26,9 @@ class tcp_client : public tcp_protocol {
 
         ::write(socket, message.c_str(), message.size());
 
-        ssize_t len = ::read(socket, buffer, sizeof(buffer) - 1);
+        ssize_t len = ::read(socket, buffer, sizeof(buffer));
         if (len > 0) {
-            buffer[len] = '\0';
-            std::cout << buffer << std::endl;
+            out.write(buffer, len);
         }
         else {
             BOOST_LOG_TRIVIAL(error) << std::format("与服务器通信不畅: {}", strerror(errno));

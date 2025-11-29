@@ -84,9 +84,9 @@ inline void init_logging() {
     // 添加通用属性, 如 时间戳
     boost::log::add_common_attributes();
 
-    // 用来测试服务守护进程化后到底是日志惰性刷新, 还是出问题了
+    // 终止信号发出后自动落地
     ::signal(SIGINT, [](int) {
-        BOOST_LOG_TRIVIAL(info) << "收到 SIGINT，退出程序";
+        BOOST_LOG_TRIVIAL(info) << "收到 SIGINT, 退出程序";
         boost::log::core::get()->flush();
         ::exit(0);
     });
