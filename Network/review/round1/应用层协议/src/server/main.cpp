@@ -1,5 +1,5 @@
 #include "boost_log.hpp"
-#include "server/SessionHandler .hpp"
+#include "server/SessionHandler.hpp"
 #include "server/tcp_server.hpp"
 
 int main(int argc, char* argv[]) {

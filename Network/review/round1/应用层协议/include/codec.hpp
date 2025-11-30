@@ -3,7 +3,6 @@
 #include <arpa/inet.h>
 
 #include <boost/log/trivial.hpp>  // 引入Boost全局日志宏
-#include <format>
 #include <string>
 
 #include "CodecException.hpp"

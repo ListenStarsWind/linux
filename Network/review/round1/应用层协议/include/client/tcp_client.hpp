@@ -2,36 +2,43 @@
 
 #include <iostream>  // cout, cin
 
+#include "client/SessionAdapter.hpp"
 #include "tcp_protocol.hpp"
 
 class tcp_client : public tcp_protocol {
     using isstream = std::iostream;
 
    public:
-    tcp_client(const addr_t& server_addr = tcp_protocol::_server_addr,
+    tcp_client(SessionAdapterBase* SessionAdapter,
+               const addr_t& server_addr = tcp_protocol::_server_addr,
                port_t server_port = tcp_protocol::_server_port)
-        : _server_addr(server_addr), _server_port(server_port) {}
+        : _SessionAdapter(SessionAdapter), _server_addr(server_addr), _server_port(server_port) {}
 
     ~tcp_client() override = default;
 
     // 在客户端, 它是短连接的
     void run(istream& in = std::cin, ostream& out = std::cout) override {
         (void)out;
+        (void)in;
         reset_proto_socket();
         connect();
         const socket_t socket = get_proto_socket();
-        std::string message{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        std::string message = _SessionAdapter->send();
         char buffer[4096] = {0};
         start_running();
 
         ::write(socket, message.c_str(), message.size());
 
         ssize_t len = ::read(socket, buffer, sizeof(buffer));
-        if (len > 0) {
-            out.write(buffer, len);
-        }
-        else {
+        if (len <= 0) {
             BOOST_LOG_TRIVIAL(error) << std::format("与服务器通信不畅: {}", strerror(errno));
+        }
+
+        std::string response(buffer, buffer + len);
+        try {
+            _SessionAdapter->recv(response);
+        } catch (std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << std::format("会话层之上出现了异常: {}", e.what());
         }
 
         stop_running();
@@ -62,6 +69,7 @@ class tcp_client : public tcp_protocol {
     }
 
    private:
+    SessionAdapterBase* _SessionAdapter;
     addr_t _server_addr;
     port_t _server_port;
 

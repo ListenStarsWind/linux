@@ -9,7 +9,7 @@
 
 #include "codec.hpp"
 #include "proto/calculator.pb.h"
-#include "server/CalculatorException.hpp"
+#include "server/ServerSerializationException.hpp"
 
 class SessionHandler {
    public:
@@ -39,7 +39,7 @@ class SessionHandler {
         auto val = calc::CalcResponse_StatusCode::CalcResponse_StatusCode_SUCCESS;
         try {
             result = it->second(quest_body.left(), quest_body.right());
-        } catch (CalculatorException& e) {
+        } catch (ServerSerializationException& e) {
             val = e.code();
             running_error = e.what();
         }
@@ -77,7 +77,7 @@ class SessionHandler {
     static double add(double left, double right) {
         double result = left + right;
         if (!std::isfinite(result)) {
-            throw CalculatorException(
+            throw ServerSerializationException(
                 calc::CalcResponse_StatusCode::CalcResponse_StatusCode_OVERFLOW,
                 std::format("加法溢出: {} + {}", left, right));
         }
@@ -87,7 +87,7 @@ class SessionHandler {
     static double sub(double left, double right) {
         double result = left - right;
         if (!std::isfinite(result)) {
-            throw CalculatorException(
+            throw ServerSerializationException(
                 calc::CalcResponse_StatusCode::CalcResponse_StatusCode_OVERFLOW,
                 std::format("减法溢出: {} - {}", left, right));
         }
@@ -97,7 +97,7 @@ class SessionHandler {
     static double mul(double left, double right) {
         double result = left * right;
         if (!std::isfinite(result)) {
-            throw CalculatorException(
+            throw ServerSerializationException(
                 calc::CalcResponse_StatusCode::CalcResponse_StatusCode_OVERFLOW,
                 std::format("乘法溢出: {} * {}", left, right));
         }
@@ -111,7 +111,7 @@ class SessionHandler {
         }
         double result = left / right;
         if (!std::isfinite(result)) {
-            throw CalculatorException(
+            throw ServerSerializationException(
                 calc::CalcResponse_StatusCode::CalcResponse_StatusCode_OVERFLOW,
                 std::format("除法溢出: {} / {}", left, right));
         }
