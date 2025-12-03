@@ -1,37 +1,76 @@
 #pragma once
 
-#include <signal.h>  // kill
+#include <fcntl.h>
+#include <signal.h>
 
-#include <thread>
+#include <unordered_map>
 
 #include "Epoller.hpp"
 #include "tcp_protocol.hpp"
-#include "thread_pool.hpp"
 
-class tcp_server : public tcp_protocol {
-    using thread = std::thread;
-    using task_t = std::function<void(void)>;
-    using tasks_t = thread_pool<task_t>;
-    using tasks_ptr_t = std::unique_ptr<tasks_t>;
-    using call_back_t = std::function<std::string(std::string&)>;
+class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_protocol {
+    using EpollerItem = Epoller::EpollerItem;
+    using self_weak_ptr = std::weak_ptr<tcp_server>;
+    using on_event_call_t = connection::function_base;
+    using self_shared_ptr = std::shared_ptr<tcp_server>;
+    using on_message_call_t = std::function<std::string(std::string&)>;
+    using connects = std::unordered_map<connection*, connect_shared_ptr>;
+
+   private:
+    tcp_server(const on_message_call_t& call_back, const addr& addr, port port, int epoll_size)
+        : _call_back(call_back),
+          _listen_addr(addr),
+          _listen_port(port),
+          _epoll(std::make_unique<Epoller>(epoll_size)) {
+    }
 
    public:
-    tcp_server(const call_back_t& call_back, const addr_t& listen_addr = "0.0.0.0",
-               port_t listen_port = 8080, int epoll_size = 64)
-        : _call_back(call_back),
-          _listen_addr(listen_addr),
-          _listen_port(listen_port),
-          _task_pool(std::make_unique<tasks_t>(5)),
-          _epoll(epoll_size) {
+    ~tcp_server() override = default;
+
+    static self_shared_ptr create(const on_message_call_t& call_back, const addr& addr = "0.0.0.0",
+                                  port port = tcp_protocol::_server_port, int epoll_size = 64) {
+        auto server = self_shared_ptr(new tcp_server(call_back, addr, port, epoll_size));
+        server->init();
+        return server;
+    }
+
+    void run() override {
+        start_running();
+        while (is_running()) {
+            dispatch(-1);
+        }
+        stop_running();
+    }
+
+    const addr& get_addr() {
+        return _listen_addr;
+    }
+
+    port get_port() {
+        return _listen_port;
+    }
+
+   private:
+    void init() {
         try {
-            reset_proto_socket();
-            sockaddr_t listen_sockaddr;
+            sockaddr listen_sockaddr;
             tcp_protocol::sockaddr_in_init(listen_sockaddr, _listen_addr, _listen_port);
-            auto& listen_socket = get_proto_socket();
+            int listen_fd = tcp_protocol::socket_init();
+            tcp_server::SetNonBlock(listen_fd);
+            auto listen_socket =
+                connection::create(listen_fd, _listen_addr, _listen_port, shared_from_this());
             tcp_protocol::bind_port(listen_socket, listen_sockaddr);
             tcp_protocol::listen(listen_socket);
-            _epoll.add(listen_socket, Epoller::EpollerItem::inreadable);
-            listen_socket.set_in_call([](){});
+
+            listen_socket->set_register_call(
+                std::bind(tcp_server::connect_register, std::placeholders::_1,
+                          Epoller::EpollerItem::inreadable | Epoller::EpollerItem::edge_trigger));
+
+            listen_socket->set_unregister_call(tcp_server::connect_unregister);
+
+            listen_socket->set_in_call(tcp_server::accept_connect);
+
+            listen_socket->register_call();
             ::signal(SIGPIPE, SIG_IGN);
         } catch (std::system_error& e) {
             BOOST_LOG_TRIVIAL(fatal) << std::format("服务初始化发生致命错误: {}", e.what());
@@ -39,75 +78,258 @@ class tcp_server : public tcp_protocol {
         }
     }
 
-    ~tcp_server() override = default;
+    template <class LogExpr>
+    inline static void connect_common(connect_weak_ptr connect, LogExpr&& log_expr) {
+        auto socket = connect.lock();
+        if (!socket) throw std::runtime_error("连接生命周期过早结束");
 
-    void run() override {
-        sockaddr_t user_sockaddr;
-        const auto& listen_socket = get_proto_socket();
-        start_running();
+        auto server = socket->server().lock();
+        if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
+
+        // 自定义日志
+        log_expr(*socket);
+
+        // 查找并删除
+        auto it = server->_connects.find(socket.get());
+        if (it == server->_connects.end()) throw std::runtime_error("连接移除时找不到句柄");
+
+        server->_epoll->del(socket);
+        server->_connects.erase(it);
+
+        if (socket.use_count() > 2) {
+            BOOST_LOG_TRIVIAL(error) << "针对连接存在疑似内存泄露现象";
+        }
+
+        socket->close();
+        socket->is_register() = false;
+    }
+
+    void dispatch(int timeout) {
+        auto items = _epoll->wait(timeout);
+        // BOOST_LOG_TRIVIAL(debug) << std::format("待处理的连接数: {}", items.size());
+        for (auto& item : items) {
+            // 简化逻辑, 将文件错误和对端关闭统一转换成 IO 问题
+            // BOOST_LOG_TRIVIAL(debug)
+            //     << std::format("事件类型为: {}", EpollerItem::event_name(item.events()));
+            if (item.events() & Epoller::EpollerItem::error) {
+                item.events() |=
+                    (Epoller::EpollerItem::inreadable | Epoller::EpollerItem::outwritable);
+            }
+            if (item.events() & Epoller::EpollerItem::hangup) {
+                item.events() |=
+                    (Epoller::EpollerItem::inreadable | Epoller::EpollerItem::outwritable);
+            }
+
+            auto connect = item.connect()->shared_from_this();
+
+            if (item.events() & Epoller::EpollerItem::inreadable) {
+                connect->in_call();
+            }
+
+            // 这个连接实际上已经失效, 不需要继续判断
+            if (connect->is_closed()) continue;
+            // 这个连接在会话层已经被注销, 不需要继续判断
+            if (!connect->is_register()) continue;
+
+            if (item.events() & Epoller::EpollerItem::outwritable) {
+                connect->out_call();
+            }
+        }
+    }
+
+    self_weak_ptr weak_from_this() {
+        return shared_from_this();
+    }
+
+    // 在 epoll 模型中, EpollerItem::error 和 EpollerItem::hangup 是"强制触发型"事件
+    // 即使我们没有显式关心, wait 的时候仍旧可以等到
+    static void connect_register(connect_weak_ptr connect, uint32_t events) {
+        auto socket = connect.lock();
+        if (!socket) throw std::runtime_error("连接生命周期过早结束");
+        auto server = socket->server().lock();
+        if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
+
+        // 当 add 抛出异常后, 因为还没有注册到会话层, 所以会话层不用做对应处理
+        // 也就是说这两句的顺序是不能颠倒的, 如果颠倒, 我们就需要在外界注销连接
+        // 但连接本身引用计数归零, 我们找不到控制它的句柄, 就无法注销, 从而形成内存泄露
+        server->_epoll->add(socket, events);
+        server->_connects.emplace(socket.get(), socket);
+
+        // 三个: 调用注册回调的, 回调里的lock, 注册到map里的
+        // BOOST_LOG_TRIVIAL(debug) << std::format("当前引用计数为: {}", socket.use_count());
+    }
+
+    static void connect_unregister(connect_weak_ptr connect) {
+        connect_common(connect, [&](auto& s) {
+            BOOST_LOG_TRIVIAL(info) << std::format("会话(\"{}:{}\")注销开始", s.addr(), s.port());
+        });
+    }
+
+    static void connect_hangup(connect_weak_ptr connect) {
+        connect_common(connect, [&](auto& s) {
+            BOOST_LOG_TRIVIAL(info)
+                << std::format("对端(\"{}:{}\")关闭了连接, 将执行注销回调", s.addr(), s.port());
+        });
+    }
+
+    static void connect_error(connect_weak_ptr connect) {
+        connect_common(connect, [&](auto& s) {
+            BOOST_LOG_TRIVIAL(info)
+                << std::format("对端(\"{}:{}\")错误, 将执行注销回调", s.addr(), s.port());
+        });
+    }
+
+    static void accept_connect(connect_weak_ptr connect) {
+        auto listen_socket = connect.lock();
+        if (!listen_socket) throw std::runtime_error("监听连接生命周期过早结束");
+        auto server = listen_socket->server().lock();
+        if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
+        sockaddr user_sockaddr;
         while (true) {
             tcp_protocol::bzero(user_sockaddr);
-            auto user_socket = tcp_protocol::accept(listen_socket, user_sockaddr);
-            if (user_socket < 0) continue;
+            int fd = tcp_protocol::accept(listen_socket, user_sockaddr);
+            if (fd >= 0) {
+                try {
+                    // 若它抛出异常, 会话层不需要进行任何移除行为
+                    tcp_server::SetNonBlock(fd);
+                    // 若 new 抛出异常, 就不用考虑了, 那时候应该在意系统
+                    auto socket = connection::create(fd, tcp_protocol::inet_ntop(user_sockaddr),
+                                                     user_sockaddr.sin_port, server);
+                    socket->set_register_call(
+                        std::bind(tcp_server::connect_register, std::placeholders::_1,
+                                  EpollerItem::inreadable | EpollerItem::edge_trigger));
 
-            auto user_ip = tcp_protocol::inet_ntop(user_sockaddr);
-            func(user_socket, user_ip);
-        }
-        stop_running();
-    }
+                    socket->set_unregister_call(tcp_server::connect_unregister);
 
-   private:
-    void func(int socket, const addr_t& user_ip) {
-        task_t t = [this, socket, user_ip]() {
-            (void)user_ip;
-            char buffer[1024] = {0};
-            std::string messages;
-            std::string temp;
-            while (true) {
-                ssize_t len = ::read(socket, buffer, sizeof(buffer));
-                if (len > 0) {
-                    BOOST_LOG_TRIVIAL(info) << std::format("用户发出了这样的消息: {}", buffer);
-                    temp.clear();
-                    temp.append(buffer, len);
-                    messages += temp;
-                    try {
-                        std::string echoes;
-                        std::string echo;
-                        do {
-                            echo.clear();
-                            echo = _call_back(messages);
-                            echoes += echo;
-                        } while (
-                            !echo.empty() &&
-                            !messages
-                                 .empty());  // echo 空意味着剩下的messages不足以构成一个完整的报文,
-                                             // 所以继续尝试读; messages空那就解析不了
-                        ::write(socket, echoes.c_str(), echoes.size());
-                    } catch (...) {
-                        BOOST_LOG_TRIVIAL(error)
-                            << std::format("应用层出现了无法处理的错误, 已将该连接视为非法");
-                        ::close(socket);
-                        return;
-                    }
-                    continue;
-                } else if (len == 0) {
-                    BOOST_LOG_TRIVIAL(info) << std::format("用户关闭了连接");
-                } else {
+                    socket->set_err_call(tcp_server::connect_error);
+
+                    socket->set_in_call(tcp_server::recv_connect);
+                    socket->set_out_call(tcp_server::send_connect);
+
+                    // 保证如果抛出异常, 则不会注册到会话层中
+                    // 而 class socket 内部析构会关闭文件描述符
+                    socket->register_call();
+
+                } catch (std::exception& e) {
                     BOOST_LOG_TRIVIAL(warning)
-                        << std::format("读端出现了错误: {}", strerror(errno));
+                        << std::format("处理新连接的时候出现了异常: {}", e.what());
+                    // 这里的异常不需要做额外后续处理
                 }
-                ::close(socket);
-                return;
+            } else {
+                // 彻底读完了
+                if (errno == EWOULDBLOCK) return;
+                // 被信号打断
+                else if (errno == EINTR)
+                    continue;
+                // 出错
+                else {
+                    listen_socket->err_call();
+                    return;
+                }
             }
-        };
+        }
+    }
 
-        _task_pool->push(t);
+    static void recv_connect(connect_weak_ptr connect) {
+        auto socket = connect.lock();
+        if (!socket) throw std::runtime_error("连接生命周期过早结束");
+        auto server = socket->server().lock();
+        if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
+        while (true) {
+            char buffer[1024];
+            std::fill(buffer, buffer + sizeof(buffer), 0);
+            ssize_t n = ::recv(socket->file(), buffer, sizeof(buffer), 0);
+            if (n > 0) {
+                socket->inBuff().append(buffer, n);
+            } else if (n == 0) {
+                // 对方读端可能还未关闭
+                // 将可能的剩余数据全部输出
+                socket->out_call();
+                // 输出回调中已经注销并关闭了
+                if (!socket->is_register()) return;
+                if (socket->is_closed()) return;
+                socket->hup_call();
+                return;
+            } else {
+                if (errno == EWOULDBLOCK) {
+                    break;
+                } else if (errno == EINTR) {
+                    continue;
+                } else {
+                    socket->unregister_call();
+                    return;
+                }
+            }
+        }
+
+        try {
+            std::string temp;
+            do {
+                temp = server->_call_back(socket->inBuff());
+                socket->outBuff() += temp;
+            } while (!temp.empty() && !socket->inBuff().empty());
+            // 新增了写关心
+            server->_epoll->mod(socket, EpollerItem::outwritable | EpollerItem::inreadable |
+                                            EpollerItem::edge_trigger);
+        } catch (std::exception& e) {
+            BOOST_LOG_TRIVIAL(error)
+                << std::format("会话层之上出现了无法处理的问题, 将注销该会话: {}", e.what());
+            socket->unregister_call();
+        }
+    }
+
+    static void send_connect(connect_weak_ptr connect) {
+        auto socket = connect.lock();
+        if (!socket) throw std::runtime_error("连接生命周期过早结束");
+        auto server = socket->server().lock();
+        if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
+        while (true) {
+            ssize_t n =
+                ::send(socket->file(), socket->outBuff().c_str(), socket->outBuff().size(), 0);
+            if (n > 0)
+                socket->outBuff().erase(0, n);
+            else if (n == 0)
+                // 发完了出去
+                break;
+            else {
+                // 传输层缓冲区满了
+                if (errno == EWOULDBLOCK)
+                    break;
+                else if (errno == EINTR)
+                    continue;
+                else {
+                    socket->err_call();
+                    return;
+                }
+            }
+        }
+
+        if (socket->outBuff().empty()) {
+            // 去除写关心
+            server->_epoll->mod(socket, EpollerItem::inreadable | EpollerItem::edge_trigger);
+        }
+    }
+
+    static void SetNonBlock(int fd) {
+        int f = fcntl(fd, F_GETFL);
+        if (f < 0) {
+            throw std::system_error(
+                errno, std::generic_category(),
+                std::format("对于文件描述符({})的连接在设置为非阻塞读文件属性时失败: ", fd));
+        }
+
+        int r = fcntl(fd, F_SETFL, f | O_NONBLOCK);
+        if (r < 0) {
+            throw std::system_error(
+                errno, std::generic_category(),
+                std::format("对于文件描述符({})的连接在设置为非阻塞写文件属性时失败: ", fd));
+        }
     }
 
    private:
-    call_back_t _call_back;
-    addr_t _listen_addr;
-    port_t _listen_port;
-    tasks_ptr_t _task_pool;
-    Epoller _epoll;
+    connects _connects;
+    on_message_call_t _call_back;
+    addr _listen_addr;
+    port _listen_port;
+    std::unique_ptr<Epoller> _epoll;
 };

@@ -16,15 +16,15 @@
 
 class tcp_protocol {
    protected:
-    using addr_t = std::string;
-    using socket_t = Connection;
-    using port_t = ::in_port_t;
-    using socket_ptr_t = std::unique_ptr<socket_t, void (*)(socket_t*)>;
-    using sockaddr_t = ::sockaddr_in;
+    using addr = std::string;
+    using port = ::in_port_t;
+    using connection = Connection;
+    using sockaddr = ::sockaddr_in;
+    using connect_shared_ptr = connection::self_shared_ptr;
+    using connect_weak_ptr = connection::self_weak_ptr;
 
    public:
-    tcp_protocol()
-        : _is_running(false), _proto_socket(new socket_t, &tcp_protocol::socket_destroy) {}
+    tcp_protocol() : _is_running(false) {}
 
     virtual ~tcp_protocol() = default;
 
@@ -33,40 +33,11 @@ class tcp_protocol {
         stop_running();
     }
 
-    void clean() {
-        _proto_socket.reset();
-    }
-
-   private:
-    static void socket_destroy(socket_t* p) {
-        if (p != nullptr) {
-            if (p->file() != 0) {
-                close(p->file());
-            }
-            delete p;
-        }
-    }
-
-   protected:
-    // 这两个接口是给客户端控制短连接时机用的
-    void close_proto_socket() {
-        close(_proto_socket->file());
-        _proto_socket->set_file(0);
-    }
-
-    void reset_proto_socket() {
-        _proto_socket->set_file(tcp_protocol::socket_init());
-    }
-
-    // 以只读形式暴露原初套接字描述符
-    socket_t& get_proto_socket() {
-        return *_proto_socket;
-    }
-
     bool is_running() {
         return _is_running;
     }
 
+   protected:
     void start_running() {
         BOOST_LOG_TRIVIAL(info) << std::format("程序正在运行, 已经进入网络IO主逻辑");
         _is_running = true;
@@ -77,17 +48,23 @@ class tcp_protocol {
         _is_running = false;
     }
 
-    static void listen(const socket_t& socket, int backlog = 5) {
-        int ret = ::listen(socket.file(), backlog);
+    static void listen(connect_weak_ptr connect, int backlog = 5) {
+        auto socket = connect.lock();
+        int ret = ::listen(socket->file(), backlog);
         if (ret < 0) {
-            throw std::system_error(errno, std::generic_category(), std::format("套接字描述符({})设置监听状态失败: ", socket.file()));
+            throw std::system_error(
+                errno, std::generic_category(),
+                std::format("套接字描述符({})设置监听状态失败: ", socket->file()));
         }
-        BOOST_LOG_TRIVIAL(info) << std::format("描述符为{}的套接字设置监听状态成功", socket.file());
+        BOOST_LOG_TRIVIAL(info) << std::format("描述符为{}的套接字设置监听状态成功",
+                                               socket->file());
     }
 
-    static int accept(const socket_t& socket, sockaddr_t& user_sockaddr) {
+    static int accept(connect_weak_ptr connect, sockaddr& user_sockaddr) {
+        auto socket = connect.lock();
         socklen_t len = static_cast<socklen_t>(sizeof(user_sockaddr));
-        auto user_socket = ::accept(socket.file(), reinterpret_cast<::sockaddr*>(&user_sockaddr), &len);
+        auto user_socket =
+            ::accept(socket->file(), reinterpret_cast<::sockaddr*>(&user_sockaddr), &len);
         if (user_socket < 0) {
             BOOST_LOG_TRIVIAL(warning) << std::format("接触到一个异常的用户连接");
         } else {
@@ -112,17 +89,17 @@ class tcp_protocol {
         return socket;
     }
 
-    static addr_t inet_ntop(const sockaddr_t& sockaddr) {
+    static addr inet_ntop(const sockaddr& sockaddr) {
         char buffer[32];
         ::inet_ntop(AF_INET, &sockaddr.sin_addr, buffer, sizeof(buffer));
         return buffer;
     }
 
-    static void bzero(sockaddr_t& sockaddr) {
+    static void bzero(sockaddr& sockaddr) {
         ::bzero(&sockaddr, sizeof(sockaddr));
     }
 
-    static void sockaddr_in_init(sockaddr_t& sockaddr, const addr_t& addr, port_t port) {
+    static void sockaddr_in_init(sockaddr& sockaddr, const addr& addr, port port) {
         tcp_protocol::bzero(sockaddr);
         sockaddr.sin_family = AF_INET;
         sockaddr.sin_port = ::htons(port);
@@ -131,21 +108,24 @@ class tcp_protocol {
                                                std::to_string(port));
     }
 
-    static void bind_port(const socket_t& socket, const sockaddr_t& sockaddr) {
-        int ret = ::bind(socket.file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
+    static void bind_port(connect_weak_ptr connect, const sockaddr& sockaddr) {
+        auto socket = connect.lock();
+        int ret = ::bind(socket->file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
                          static_cast<::socklen_t>(sizeof(sockaddr)));
         if (ret != 0) {
-            throw std::system_error(errno, std::generic_category(), std::format("套接字({})绑定端口错误: ", socket.file()));
+            throw std::system_error(errno, std::generic_category(),
+                                    std::format("套接字({})绑定端口错误: ", socket->file()));
         }
 
-        BOOST_LOG_TRIVIAL(info) << std::format("对于{}套接字描述符已经绑定成功", socket.file());
+        BOOST_LOG_TRIVIAL(info) << std::format("对于{}套接字描述符已经绑定成功", socket->file());
     }
 
-    static bool connect(const socket_t& socket, const addr_t& addr = tcp_protocol::_server_addr,
-                        port_t port = tcp_protocol::_server_port) {
-        sockaddr_t sockaddr;
+    static bool connect(connect_weak_ptr connect, const addr& addr = tcp_protocol::_server_addr,
+                        port port = tcp_protocol::_server_port) {
+        auto socket = connect.lock();
+        sockaddr sockaddr;
         tcp_protocol::sockaddr_in_init(sockaddr, addr, port);
-        int ret = ::connect(socket.file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
+        int ret = ::connect(socket->file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
                             static_cast<::socklen_t>(sizeof(sockaddr)));
         if (ret < 0) {
             BOOST_LOG_TRIVIAL(error) << std::format("对于服务器\"{}:{}\"的连接出现了错误: {}", addr,
@@ -158,9 +138,8 @@ class tcp_protocol {
 
    private:
     bool _is_running;
-    socket_ptr_t _proto_socket;
 
    public:
-    inline static addr_t _server_addr = "47.107.254.122";
-    inline static port_t _server_port = 8080;
+    inline static addr _server_addr = "47.107.254.122";
+    inline static port _server_port = 8080;
 };

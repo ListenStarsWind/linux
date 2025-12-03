@@ -6,9 +6,9 @@
 #include <system_error>
 #include <vector>
 
+#include "Connection.hpp"
 #include "EpollerItem.hpp"
 #include "NonCopy.hpp"
-#include "Connection.hpp"
 
 class Epoller : public NonCopy {
    public:
@@ -41,8 +41,9 @@ class Epoller : public NonCopy {
         return items;
     }
 
-    void add(const Connection& connect, uint32_t event) {
-        EpollerItem item(event, &connect);
+    void add(Connection::self_weak_ptr connect, uint32_t event) {
+        auto con = connect.lock();
+        EpollerItem item(event, con.get());
         int n = ::epoll_ctl(_epfd, EPOLL_CTL_ADD, item.connect()->file(),
                             reinterpret_cast<epoll_event*>(&item));
         if (n < 0) {
@@ -50,8 +51,9 @@ class Epoller : public NonCopy {
         }
     }
 
-    void mod(const Connection& connect, uint32_t event) {
-        EpollerItem item(event, &connect);
+    void mod(Connection::self_weak_ptr connect, uint32_t event) {
+        auto con = connect.lock();
+        EpollerItem item(event, con.get());
         int n = ::epoll_ctl(_epfd, EPOLL_CTL_MOD, item.connect()->file(),
                             reinterpret_cast<epoll_event*>(&item));
         if (n < 0) {
@@ -59,8 +61,9 @@ class Epoller : public NonCopy {
         }
     }
 
-    void del(const Connection& connect) {
-        int n = ::epoll_ctl(_epfd, EPOLL_CTL_DEL, connect.file(), nullptr);
+    void del(Connection::self_weak_ptr connect) {
+        auto con = connect.lock();
+        int n = ::epoll_ctl(_epfd, EPOLL_CTL_DEL, con->file(), nullptr);
         if (n < 0) {
             throw std::system_error(errno, std::generic_category(), "epoll事件删除出错");
         }
