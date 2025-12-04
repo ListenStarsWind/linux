@@ -10404,7 +10404,7 @@ struct timeval {
 };
 ```
 
-就像我们之前说的, `select`可以用来对多个文件进行等待, 很明显这意味着它要遍历进程的文件描述符表, 为了让它清楚读到哪个位置就不用继续往后读了, 就需要第一个参数`nfds`, 比如, 如果你要等的文件描述符中最大的那个是`1000`, 那就把`nfds`定为`1001`, 后面的三个`fd_set *`本质上是系统自己的一种位图结构, 下面的四个宏就是对其进行操作的接口, 它们描述了哪些文件是需要等待的, 位置不同, 具体等待的事件就不同, `readfds`表示关心可读事件的文件描述符集合, 当用户对其中的对应文件描述符进行标记时, 如果这些文件可以被读, 就是调用度接口不会被阻塞, 更严谨的说, 是不会把错误码设置成`EWOULDBLOCK`, `select`就会立刻返回,        `writefds`表示关心可写事件的文件描述符集合, `select`会对用户标记的标志位反复遍历, 当对应的文件可以写时, 就会立刻返回,     `exceptfds`描述用户关心的异常事件文件描述符集合, 常用于处理带外数据(TCP紧急指针),   这三个`fd_set*`都是输入输出参数, 当函数返回时, 里面的信息描述那些文件发生了对应的事件,         `struct timeval`, 描述等待的临界时间, 如果超过这个时间, 那就不要等了, 直接返回, 它也是输出输出参数, `select`也会对其进行修改, 等会儿实验的时候就能看到了, `timeval`全零就是非阻塞(不等), 设为`nullptr`, 就是阻塞(永久等待)
+就像我们之前说的, `select`可以用来对多个文件进行等待, 很明显这意味着它要遍历进程的文件描述符表, 为了让它清楚读到哪个位置就不用继续往后读了, 就需要第一个参数`nfds`, 比如, 如果你要等的文件描述符中最大的那个是`1000`, 那就把`nfds`定为`1001`, 后面的三个`fd_set *`本质上是系统自己的一种位图结构, 下面的四个宏就是对其进行操作的接口, 它们描述了哪些文件是需要等待的, 位置不同, 具体等待的事件就不同, `readfds`表示关心可读事件的文件描述符集合, 当用户对其中的对应文件描述符进行标记时, 如果这些文件可以被读, 就是调用读接口不会被阻塞, 更严谨的说, 是不会把错误码设置成`EWOULDBLOCK`, `select`就会立刻返回,        `writefds`表示关心可写事件的文件描述符集合, `select`会对用户标记的标志位反复遍历, 当对应的文件可以写时, 就会立刻返回,     `exceptfds`描述用户关心的异常事件文件描述符集合, 常用于处理带外数据(TCP紧急指针),   这三个`fd_set*`都是输入输出参数, 当函数返回时, 里面的信息描述那些文件发生了对应的事件,         `struct timeval`, 描述等待的临界时间, 如果超过这个时间, 那就不要等了, 直接返回, 它也是输出输出参数, `select`也会对其进行修改, 等会儿实验的时候就能看到了, `timeval`全零就是非阻塞(不等), 设为`nullptr`, 就是阻塞(永久等待)
 
 `select`的返回值有三种情况, 如果是正数, 比如返回`n`, 那就是`n`个关心的事件发生了, 如果是0, 表示超时, 什么都没等到, 返回值为负数表示`select`出错了.
 
@@ -11064,7 +11064,7 @@ file locks                          (-x) unlimited
 
 ### poll
 
-有需求就有解决方案, 既然`select`有这么多的缺点, 于是就出现了基于`select`类似底层逻辑的`poll`, 最为多路转接的其它选择., 如果弄清楚了`select`, `poll`会非常简单, 由于底层逻辑类似, 所以我们可以直接在`select`的代码基础上进行修改.
+有需求就有解决方案, 既然`select`有这么多的缺点, 于是就出现了基于`select`类似底层逻辑的`poll`, 作为多路转接的其它选择., 如果弄清楚了`select`, `poll`会非常简单, 由于底层逻辑类似, 所以我们可以直接在`select`的代码基础上进行修改.
 
 ```cpp
 #include <poll.h>
@@ -11086,7 +11086,7 @@ struct pollfd {
 };
 ```
 
-其中`fd`表示要关心的文件描述符, `events`用于告诉内核对该`fd`要关心的是事件, `revents`用于获知该文件是否准备就绪.以前`select`对于事件信息的传输使用输入输出函数, 就像是单车道, 而对于`poll`来说, 内核读`events`, 然后检测, 把结果写回到`revents`, 于是在应用层我们就可以直接看`revents`.它是双车道, 两个车道之间不会相互干扰, 所以只要最开始把`events`初始化完后就行了, 不需要再次初始化,          并且由于它是数组, 所以理论上想设多大就设多大.
+其中`fd`表示要关心的文件描述符, `events`用于告诉内核对该`fd`要关心的事件种类, `revents`用于获知该文件是否准备就绪.以前`select`对于事件信息的传输使用输入输出函数, 就像是单车道, 而对于`poll`来说, 内核读`events`, 然后检测, 把结果写回到`revents`, 于是在应用层我们就可以直接看`revents`.它是双车道, 两个车道之间不会相互干扰, 所以只要最开始把`events`初始化完后就行了, 不需要再次初始化,          并且由于它是数组, 所以理论上想设多大就设多大.
 
 ![image-20250502195628492](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502195628715.png)
 
@@ -11368,7 +11368,7 @@ int epoll_wait(int epfd, struct epoll_event *events,
                int maxevents, int timeout);
 ```
 
-`epoll_wait`用于等待事件就绪, `epfd`就是`epoll`模型的文件描述符, 就是之前`epoll_create`返回的那个, `events, maxevents`描述了应用层缓冲区, `epoll_wait`会把已经就绪的时间直接写到这个缓冲区中, 而不需要我们自己判断哪些事件就绪, `timeout`单位仍旧是毫秒.   返回值表示向用户层缓冲区写入的已经就绪的事件个数.
+`epoll_wait`用于等待事件就绪, `epfd`就是`epoll`模型的文件描述符, 就是之前`epoll_create`返回的那个, `events, maxevents`描述了应用层缓冲区, `epoll_wait`会把已经就绪的事件直接写到这个缓冲区中, 而不需要我们自己判断哪些事件就绪, `timeout`单位仍旧是毫秒.   返回值表示向用户层缓冲区写入的已经就绪的事件个数.
 
 ```cpp
 struct epoll_event {
@@ -11596,13 +11596,18 @@ union epoll_data {
 };
 ```
 
-- EPOLLIN : 表示对应的文件描述符可以读 (包括对端SOCKET正常关闭);  
-- EPOLLOUT : 表示对应的文件描述符可以写;  
-- EPOLLPRI : 表示对应的文件描述符有紧急的数据可读 (这里应该表示有带外数据到来);  
-- EPOLLERR : 表示对应的文件描述符发生错误;  
-- EPOLLHUP : 表示对应的文件描述符被挂断;  
-- EPOLLET : 将EPOLL设为边缘触发(Edge Triggered)模式, 这是相对于水平触发(Level Triggered)来说的  
-- EPOLLONESHOT：只监听一次事件, 当监听完这次事件之后, 如果还需要继续监听这个socket的话, 需要再次把这个socket加入到EPOLL队列里.  
+| 事件名           | 是否自动返回（无需关心） | 类型         | 说明                                                       |
+| ---------------- | ------------------------ | ------------ | ---------------------------------------------------------- |
+| **EPOLLIN**      | ✘                        | 可读事件     | fd 可读，包括正常数据与对端关闭（EOF）；不关注则不会收到。 |
+| **EPOLLOUT**     | ✘                        | 可写事件     | fd 可写（发送缓冲区未满）；不关注则不会收到。              |
+| **EPOLLPRI**     | ✘                        | 带外数据     | 有紧急（OOB）数据可读，极少使用；不关注则不会收到。        |
+| **EPOLLERR**     | ✔（强制）                | 错误事件     | fd 发生错误，始终返回，无法屏蔽。                          |
+| **EPOLLHUP**     | ✔（强制）                | 挂断事件     | fd 被挂断，对端关闭也可能触发；始终返回。                  |
+| **EPOLLRDHUP**   | ✘                        | 半关闭事件   | 对端执行 shutdown(WR)；不关注就不会收到（属于可读类）。    |
+| **EPOLLET**      | —（修饰符）              | 触发模式标志 | 切换为边缘触发 ET，影响通知策略，不是事件本身。            |
+| **EPOLLONESHOT** | —（修饰符）              | 一次性事件   | 只监听一次，需要重新 mod 才会继续监听；不是事件本身。      |
+
+注意 , 从内核视角来看, 本质上只有两种事件, 那就是"可读事件" 和"可写事件", 而其它事件, 比如**HUP / RDHUP / ERR** 并不是独立于可读/可写之外的“第三类事件, 而是可读事件的细化:  连接被对端关闭 → 触发 **HUP/RDHUP**, 体现为 读方向出现特殊状态（EOF 或对端半关闭）, 套接字异常（例如 RST）→ 触发 **ERR**, 同样表现为读方向不可再正常读取, 所以我们实际写代码的时候也一般重点在 IO 也就是读写方法上, 而把其它的事件, 转化成 IO 错误, 用 IO 错误的逻辑去处理其它事件
 
 下面我们就来写`epoller`的`ctl`接口, 由于`epoll_ctl`的`op`只有三种, 所以我们可以对其进行功能上的拆分, 拆成添加, 修改, 删除这三个子接口
 
@@ -11790,31 +11795,31 @@ void response_(int fd)
 
 -------------------
 
-下面我们说说`epoll`的两种工作模式. 水平触发(LT), 边缘触发(ET).
+下面我们说说`epoll`的两种工作模式. 水平触发(LT), 边缘触发(ET). 这两种方式仅在可读事件里会产生差异.
 
-`epoll` 默认采用的是 LT(Level Triggered，水平触发)模式，`select` 和 `poll` 也是基于这种模式。LT 模式是状态驱动的，只要文件描述符处于就绪状态，它就会一直出现在就绪队列中。
+我们知道, `epoll` 本质是替我们完成 `IO` 等的部分, 既然是替我们, 那么最后自然要通知我们, 至于如何通知我们, 或者说通知的策略是怎样的, 就有两种逻辑, 第一种逻辑, 就是状态驱动, 在状态驱动这个逻辑下, 只要传输层的接收缓冲区未满, 那么我们就可以 `wait` 到可读事件; 第二种逻辑, 则是事件驱动, 在该逻辑下, 只有对端朝本端传输层的接收缓冲区写数据, 才可以 `wait` 到, 而在其它情况, 比如, 传输层接收缓冲区明明有数据, 但对端没有发送新数据, 那你就 `wait` 不到可读事件.
 
-例如，在读操作中，如果某次 `epoll_wait` 返回了就绪的 fd `a`，但你没有读，或者没有读完它的缓冲区数据，那么下一次调用 `epoll_wait` 时，它仍会出现在就绪队列中，你仍可以再次收到 `a` 并继续读数据。
+这意味着, 如果我们采用事件驱动这个逻辑去关心可读事件, 那么当`wait`出可读事件后, 我们一定要把传输层接收缓冲区中的数据全部读到应用层上 否则, 在这之后, 除非对端再次向本端发送数据, 否则, 我们就 `wait` 不到可读事件, 从而在一定程度上造成了接收缓冲区中数据的暂时丢失.
 
-而ET(Edge Triggered，边沿触发) 模式是事件驱动的，它只会在文件描述符的状态发生“边沿变化”时（例如从不可读变成可读）才通知一次。换句话说，只有写端写入新数据时，fd 才会出现在就绪队列中。
+从代码的具体处理上来看, 如果举个形象的例子, 对于采用状态驱动的可读事件, 传输层接收缓冲区上的数据就像是快递柜上的快递, 你今天收到了电商软件的消息, 说快递已经到达了驿站, 在某某快递柜上, 号码是什么, 但今天你不太方便, 没去取; 那在明天, 你又会收到一封短信, 提醒你, 快递已经放驿站一天了, 号码多少, 赶快来取, 重点在于, 快递放在快递柜上, 它就会多次提醒你; 而对于事件驱动的可读事件, 传输层接收缓冲区中的数据就像是送货到门的快递, 快递员到了你的家门, 敲门, 家里没人, 打电话, 没接通, 那就没办法, 认为你拒收了, 重点在于, 事件驱动只会在数据到达传输层接收缓冲区或者说快递员带着你的快递到达你家门口的时候才会通知你一次, 之后, 不会再做通知.
 
-如果你第一次从 `epoll_wait` 拿到了 `a`，但没有处理它，等到下一次 `epoll_wait`，由于没有新的数据写入（也就是没有新的“边沿”），fd `a` 就不会再出现了。这意味着你将“错过”这次读取机会，除非写端再次写入数据，触发新的“边沿事件”。
+在水平触发模式下, `epoll` 对于可读事件的通知逻辑是状态驱动的, 而在边缘触发时, 对于可读事件是事件驱动的. 我在这里强调, 我说的仅仅是可读事件, 对于其它类型的事件, 比如可写事件, 不管是水平还是边缘, 那都是状态驱动的逻辑, 你可以这样想, 如果可写事件采用事件驱动会不会很奇怪呢: 只有传输层发送缓冲区由满变为不满的时候才`wait`你, 但传输层发送缓冲区还是比较大的, 它不太可能会被填满, 再说我们本身的逻辑就是 `epoll` 通知我们可写, 然后我们把应用层缓冲区的数据写到传输层发送缓冲区, 那如果可写事件采用事件驱动, 而传输层发送缓冲区最开始被创建出来肯定是空的, 是空的, 所以 `epoll` 不会通知我, 因为`epoll` 不通知我, 所以我不往发送缓冲区里写数据--这不就逻辑上死循环了吗, 所以说, 只有可读事件在水平触发和边缘触发的不同模式下行为不同, 其它事件, 比如可写事件, 不管采用哪种触发模式, 采用的都是状态驱动.
 
-这个"边缘触发"和"水平触发"是嵌入式或者单片机板子那边的概念, 水平触发就是端口(硬件的端口)是高电平那就一直有效, 边缘触发是给个上升沿才能有效.
-
-epoll 的 LT 模式就像快递被放在驿站的货架上, 你今天不取, 明天也不取, 快递还是在那里等着你, 每次你去驿站, 工作人员都会告诉你它还在; 而 ET 模式更像快递员上门送货, 敲一次门你没开就走了, 不会第二次提醒你, 除非快递公司再次发货再来一次. 所以 LT 是状态驱动的, 只要快递还在, 就会持续通知你; 而 ET 是事件驱动的, 只有状态发生变化的那一瞬间才通知你一次, 错过了就没有了.
+ "边缘触发"和"水平触发"实际上是嵌入式的概念, 如果各位对嵌入式有所了解, 就知道他们相比我们来说, 更加偏向于硬件, 比如设计电路板什么的, 搞搞单片机什么的. 对于他们来说, 水平触发就是端口(硬件的端口)是高电平那就一直有效, 边缘触发是给个上升沿才能有效.
 
 直觉上来说, ET 模式的效率高于 LT, 因为 ET 只在事件发生的那一刻通知一次, 其他时候不再打扰你, 这意味着内核可以处理更多其他事件, 不必反复提醒同一个就绪状态. 不过 ET 的代价是它具有一定的强制性, 要求你一次性把数据读干净, 否则你可能永远也收不到再次通知, 相比之下 LT 就宽松得多. 我们接下来要写的 reactor 就是基于 ET 的, 不过也不需要担心, 它的复杂性是渐进的, 并不是突然变难. 另外也要说明, 上面这些只是从直觉上的角度出发, 实际上如果 LT 控制得当, 比如及时读取数据, 也能接近 ET 的性能. 还有一点很重要的是, ET 模式由于强迫应用层读取更多数据, 会让 TCP 窗口快速释放, 使得对方可以发来更多内容, 从网络传输层面看, 这也是一种性能提升.
 
-在采用 ET（边缘触发）模式时，内核只在文件描述符状态“发生变化”的那个时刻，将它加入 epoll 的就绪队列，并在应用层调用 epoll_wait 时返回（即事件被内核写入 epoll 文件所对应的缓冲区，供应用层读取，完成“返回”）。这种触发方式只会通知一次，如果你在收到这个通知(通知是你把事件收到应用层)后，没有把该文件描述符上的数据全部处理完，那么剩下的部分虽然还在内核缓冲区中，内核也不会再次发出提醒。也就是说，对于已经收上来的文件描述符，你要在应用层尽最大努力把它的内容一次性读完或写完，直到系统调用返回 EWOULDBLOCK，说明内核中暂时已经没有可处理的数据了。下次是否还能再次获得该文件描述符的通知，取决于它是否再次发生了新的“状态变化”（比如新的数据到达）。
+在采用 ET（边缘触发）模式时，对于可读事件, 内核只在文件描述符状态“发生变化”的那个时刻，将它加入 `epoll` 的就绪队列，并在应用层调用 `epoll_wait `时返回（即事件被内核写入 `epoll` 文件所对应的缓冲区，供应用层读取，完成“返回”）。这种触发方式只会通知一次，如果你在收到这个通知(通知是你把事件收到应用层)后，没有把该文件描述符上的数据全部处理完，那么剩下的部分虽然还在内核缓冲区中，内核也不会再次发出提醒。也就是说，对于已经收上来的文件描述符，你要在应用层尽最大努力把它的内容一次性读完或写完，直到系统调用返回 EWOULDBLOCK，说明内核中暂时已经没有可处理的数据了。下次是否还能再次获得该文件描述符的通知，取决于它是否再次发生了新的“状态变化”（比如新的数据到达）。
 
-ET 的核心不是“你必须一次性把所有就绪队列里的事件都读出来”，而是：对你已经读上来的 fd，要把它的内核缓冲区清空，否则你将错失那部分数据。为了安全地完成这一行为，fd 必须设置为非阻塞模式，这样你才能在数据读完之后，通过 errno 是 EWOULDBLOCK 判断“彻底读干净了”，而不是因为阻塞而卡住进程。同时，注册到 epoll 时要或上 EPOLLET，以告知内核你使用的是边缘触发方式，已经准备好进行非阻塞处理。
+这里有一个容易混淆的点, 那就是边缘触发模式和 `epoll` 文件本身是什么关系, 答案是没有关系, `epoll` 确实也是一个文件, 但更严格地来说, 这个文件更多是为了将`epoll` 模型很好的封装起来, 从而兼容系统, 它本质上不是文件, 我们只能用特点的接口去操作`epoll`模型. 对于`epoll_wait`来说, 采用边缘模式不是说你要把所有就绪事件全部读上来, 而是说, 对于那些读上来的连接, 你要把其中的数据读完.
+
+那如何知道数据是读完的呢? 在默认的阻塞IO模式下, 阻塞了就是读完了, 但很明显, 如果阻塞了, 我这代码不就卡住了吗, 所以对于`epoll` 管理的连接, 我们首先要把它们设置成非阻塞, 而我们前面也已经学过, 非阻塞的文件, 如果没得读的话, 会返回负数, 并将错误码设置为`EWOULDBLOCK`. 下面的`Reactor`也正是这么做的.
 
 不过这时又引出了一个新的问题。由于 TCP 是面向字节流的协议，不保证消息边界，所以在一次读操作中，读到的数据可能正好是几个完整的报文，也可能只是一部分报文，尤其是最后一个报文，很可能是不完整的残片。为了应对这种情况，我们需要将它暂存在应用层缓冲区中。与此同时，还要考虑到服务端要同时处理大量的连接，每个连接都可能存在自己的残留数据，这就要求我们为每一个文件描述符建立一个对应的缓冲区，并通过某种映射结构（例如哈希表）将它们有序地管理起来。只有这样，我们才能在 ET 模式下，把内核一次性送上来的原始字节流，分批、有序地还原成完整的报文，从而正确地驱动上层逻辑。
 
 ### Reactor 
 
-Reactor 模型正是为了解决这些问题而诞生的：它不仅提供了一种高效管理海量连接的方法，还为处理复杂的字节流、解析协议、组织逻辑提供了清晰的框架。至此，我们的讨论也就达到了一个阶段性的终点。接下来，我们将在 Reactor 框架中亲手编写一个真正完整、真正具备服务能力的网络程序——它不仅能处理并发连接，还将具备清晰的层次划分，模拟出一套结构完备的七层协议栈，从网络传输到应用语义，一步步落地。
+`Reactor`框架使用的就是 `epoll` 的边缘触发模式, 那下面, 我们就写一个基本的完整 `Reactor`服务, 其中包括会话管理, 信息表示, 应用服务.
 
 --------------
 
@@ -11826,7 +11831,908 @@ Reactor 模型正是为了解决这些问题而诞生的：它不仅提供了一
 
 --------------
 
-下面我们来写代码
+下面我们就来一步步地写代码
+
+首先, 我们先准备一下项目框架, 在这里我使用`cmake` 作为项目的构建系统, 使用`protobuf`作为序列化和反序列化的具体方案, 关于`protobuf`的具体用法, 其实还是比较简单的, 写代码的时候我们随口讲讲.
+
+为了确保写项目的时候, 不会因为开发环境不一致导致我们产生差异, 因此, 最开始的时候, 我们先同步一下开发环境, 把该装的各种东西给装上
+
+在这里, 我特意把一台闲置的云服务器重装了, 系统是`Ubuntu 24.04 LTS`, 下面, 我们就来装一装需要的开发工具
+
+首先, 我们先把`apt`源给更新一下, 选择清华的 LLVM 镜像源
+
+```shell
+sudo rm -f /etc/apt/sources.list.d/*llvm*
+sudo tee /etc/apt/sources.list.d/llvm21.list <<EOF
+deb https://mirrors.tuna.tsinghua.edu.cn/llvm-apt/noble/ llvm-toolchain-noble-21 main
+EOF
+```
+
+接下来是安装 Ubuntu 对于 `llvm-apt`软件包的信任凭证
+
+```shell
+wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+```
+
+然后真正地安装开发工具链
+
+```shell
+sudo apt update
+sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+    clang-21 lld-21 clangd-21 clang-tools-21 \
+    libc++-21-dev libc++abi-21-dev libunwind-21-dev \
+    cmake ninja-build git curl wget unzip build-essential pkg-config tree
+```
+
+然后让系统对于`llvm-apt`默认使用我们上面下载的-21版本
+
+```shell
+sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-21   210
+sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 210
+sudo update-alternatives --install /usr/bin/clangd  clangd  /usr/bin/clangd-21  210
+sudo update-alternatives --install /usr/bin/ld      ld      /usr/bin/ld.lld-21  210
+```
+
+告诉系统的动态加载器, `LLVM`库在哪里
+
+```shell
+echo "/usr/lib/llvm-21/lib/x86_64-linux-gnu" | sudo tee /etc/ld.so.conf.d/llvm-21.conf >/dev/null
+sudo ldconfig
+```
+
+接着把我准备好的本地编译的库文件安装上去
+
+先把压缩包下载下来
+
+```shell
+wget https://github.com/ListenStarsWind/linux/releases/download/v1.0/libcxx-pkgs.tar.gz
+```
+
+当然, 如果你不能科学上网, 可以通过这个[腾讯微云共享链接](https://share.weiyun.com/MtnrUQS6)下载压缩包, 然后再传到云服务器上
+
+然后解压, 运行里面的安装脚本就行
+
+```shell
+[whisper@starry-sky ~]$ tar -xzvf libcxx-pkgs.tar.gz >/dev/null
+[whisper@starry-sky ~]$ cd libcxx-pkgs/
+[whisper@starry-sky libcxx-pkgs]$ ./install_libcxx.sh 
+```
+
+安装之后, 你就能在`/opt/libcxx-pkgs`下, 看到我们的安装内容了
+
+```shell
+[whisper@starry-sky ~]$ ls /opt/libcxx-pkgs/
+abseil-cpp  bin  include  lib  protobuf
+[whisper@starry-sky ~]$
+```
+
+正如它的名字那样, 因为我是用纯 `llvm` 编译的, 为了不污染 `/usr/local`, 我把它安装在了这里, `/opt`一般就是放非 `GUN`的编译产物的.
+
+接下来, 让我们看看项目的文件层次
+
+```shell
+[whisper@starry-sky reactor]$ tree .
+.
+├── build
+├── CMakeLists.txt
+├── include
+│   ├── boost_log.hpp
+│   ├── client
+│   │   ├── CalculatorApp.hpp
+│   │   ├── ClientSerializationException.hpp
+│   │   ├── SessionAdapter.hpp
+│   │   └── tcp_client.hpp
+│   ├── CodecException.hpp
+│   ├── codec.hpp
+│   ├── Connection.hpp
+│   ├── Epoller.hpp
+│   ├── EpollerItem.hpp
+│   ├── NonCopy.hpp
+│   ├── SerializationException.hpp
+│   ├── server
+│   │   ├── ServerSerializationException.hpp
+│   │   ├── SessionHandler.hpp
+│   │   └── tcp_server.hpp
+│   └── tcp_protocol.hpp
+├── proto
+│   └── calculator.proto
+└── src
+    ├── client
+    │   └── main.cpp
+    └── server
+        └── main.cpp
+
+9 directories, 20 files
+[whisper@starry-sky reactor]$ find . -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec cat {} + | wc -l
+1643
+[whisper@starry-sky reactor]$ 
+```
+
+首先第一步要做的事, 就是让构建系统最起码可以跑起来, 从而方便生成 `compile_commands.json`, 让 `clangd`语法分析器可以正常的工作, 写代码的体验就更好一些, 想使用`clangd`, 还需要在`code`上安装对应的插件
+
+![image-20251204221233358](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204221233358.png)
+
+并在远端设置中, 添加对应的`clangd`配置
+
+我们呼唤命令窗口(按下 F1)
+
+![image-20251204221648251](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204221648251.png)
+
+打开用户配置
+
+然后把下面的这段配置加进去
+
+```json
+ "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}/build",
+        "--background-index",
+        "--clang-tidy",
+        "--cross-file-rename",
+        "--header-insertion=never"
+    ]
+```
+
+重点是`"--compile-commands-dir=${workspaceFolder}/build"`, 因为`clangd`的引导文件是生成在`build`目录下的, 你不写这个, 扩展`clangd`就找不到引导文件, 也就不能提供语法分析服务, 另外, `clangd` 扩展和微软的 C/C++ 扩展 语法分析是冲突的, 你需要把它关掉
+
+为此, 我这里首先贴出 `CMakeLists.txt`, 如果你没学过`cmake`, 那你就照抄吧, 如果学过, 你可以稍微看一看, 我们重点放在代码上, 对于项目构建细节就不说了
+
+```cmake
+cmake_minimum_required(VERSION 3.22)
+project(demo LANGUAGES CXX)
+
+# 如果环境变量中显式设置了编辑器, 则 cmake 就使用用户指定的编译器
+if (DEFINED ENV{CXX})
+    set(CMAKE_CXX_COMPILER $ENV{CXX})
+else()
+    # 否则 cmake 默认使用 clang++-21 作为编译器
+    set(CMAKE_CXX_COMPILER clang++-21)
+endif()
+
+# 本项目的代码基于 llvm 环境, 因此必须使用对应的编译器
+if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "需要用 Clang 21 + libc++ 编译: export CXX=clang++-21")
+endif()
+
+# C++ 标准相关设置
+set(CMAKE_CXX_STANDARD 20)            # 使用 C++20
+set(CMAKE_CXX_STANDARD_REQUIRED ON)   # 强制要求 C++20
+set(CMAKE_CXX_EXTENSIONS OFF)         # 是否允许 GNU 扩展, OFF 表示严格标准
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # 生成 compile_commands.json，供 clangd 等工具使用
+set(CMAKE_BUILD_TYPE Debug)           # 默认 Debug，可在命令行覆盖
+set(CMAKE_POSITION_INDEPENDENT_CODE ON) # 生成位置无关代码，便于链接静态库或共享库
+
+# 为 find_package 提供额外路径
+list(PREPEND CMAKE_PREFIX_PATH "/opt/libcxx-pkgs") # 比如 Protobuf/Abseil 自定义安装目录
+
+# 找 Abseil/Protobuf/线程库
+find_package(absl    CONFIG REQUIRED)   # absl 库
+find_package(Protobuf CONFIG REQUIRED)  # protobuf 编译器及库
+find_package(Threads REQUIRED)          # 线程库（跨平台）
+
+# ====================== Boost 常用组件开关（推荐） ======================
+# 每个组件用 option 提供开关，用户可在 cmake GUI 或命令行修改
+option(USE_BOOST_SYSTEM          "启用 Boost.System"          ON)
+option(USE_BOOST_FILESYSTEM      "启用 Boost.Filesystem"      ON)
+option(USE_BOOST_THREAD          "启用 Boost.Thread"          ON)
+option(USE_BOOST_LOG             "启用 Boost.Log"             ON)
+option(USE_BOOST_LOG_SETUP       "启用 Boost.Log.Setup"       ON)
+option(USE_BOOST_PROGRAM_OPTIONS "启用 Boost.ProgramOptions"  ON)
+option(USE_BOOST_ASIO            "启用 Boost.Asio"            OFF)
+option(USE_BOOST_BEAST           "启用 Boost.Beast"           OFF)
+option(USE_BOOST_JSON            "启用 Boost.Json"            OFF)
+option(USE_BOOST_REGEX           "启用 Boost.Regex"           OFF)
+option(USE_BOOST_IOSTREAMS       "启用 Boost.Iostreams"       OFF)
+option(USE_BOOST_SERIALIZATION   "启用 Boost.Serialization"   OFF)
+option(USE_BOOST_ATOMIC          "启用 Boost.Atomic"          OFF)
+
+# 根据开关动态收集需要查找和链接的组件
+set(BOOST_COMPONENTS_TO_FIND "")   # 用于 find_package(Boost COMPONENTS ...)
+set(BOOST_LIBRARIES_TO_LINK "")    # 用于 target_link_libraries(...)
+
+# 宏：检查开关，如果启用则加入列表
+macro(add_boost_component name opt)
+    if(${opt})
+        list(APPEND BOOST_COMPONENTS_TO_FIND ${name})  # 传给 find_package 查找
+        list(APPEND BOOST_LIBRARIES_TO_LINK Boost::${name}) # 传给 target_link_libraries
+    endif()
+endmacro()
+
+# 遍历所有开关，将启用的组件加入列表
+add_boost_component(system          USE_BOOST_SYSTEM)
+add_boost_component(filesystem      USE_BOOST_FILESYSTEM)
+add_boost_component(thread          USE_BOOST_THREAD)
+add_boost_component(log             USE_BOOST_LOG)
+add_boost_component(log_setup       USE_BOOST_LOG_SETUP)
+add_boost_component(program_options USE_BOOST_PROGRAM_OPTIONS)
+add_boost_component(asio            USE_BOOST_ASIO)
+add_boost_component(beast           USE_BOOST_BEAST)
+add_boost_component(json            USE_BOOST_JSON)
+add_boost_component(regex           USE_BOOST_REGEX)
+add_boost_component(iostreams       USE_BOOST_IOSTREAMS)
+add_boost_component(serialization   USE_BOOST_SERIALIZATION)
+add_boost_component(atomic          USE_BOOST_ATOMIC)
+
+# 只有至少启用了一个组件时才查找 Boost
+if(BOOST_COMPONENTS_TO_FIND)
+    find_package(Boost REQUIRED COMPONENTS ${BOOST_COMPONENTS_TO_FIND})
+endif()
+
+# ====================== 路径与源文件 ======================
+set(PROTO_DIR   "${CMAKE_SOURCE_DIR}/proto")       # protobuf 源文件目录
+set(GEN_ROOT    "${CMAKE_BINARY_DIR}/gen")         # protobuf 生成文件目录
+set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include) # 项目头文件目录
+set(SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src)     # 项目源文件目录
+
+# 递归收集 server 源文件（包含 .cpp 和 .cc）
+file(GLOB SERVER_SOURCES CONFIGURE_DEPENDS
+     "${SOURCE_DIR}/server/*.cpp"
+     "${SOURCE_DIR}/server/*.cc"
+     "${SOURCE_DIR}/*.cpp"
+     "${SOURCE_DIR}/*.cc")
+
+# 递归收集 client 源文件（包含 .cpp 和 .cc）
+file(GLOB CLIENT_SOURCES CONFIGURE_DEPENDS
+     "${SOURCE_DIR}/client/*.cpp"
+     "${SOURCE_DIR}/client/*.cc"
+     "${SOURCE_DIR}/*.cpp"
+     "${SOURCE_DIR}/*.cc")
+
+# ====================== protobuf 生成函数 ======================
+function(add_protobuf_generation)
+    # 解析函数调用时输入的参数，初始化 ARG_GEN_ROOT 和 ARG_PROTO_DIR
+    cmake_parse_arguments(ARG "" "GEN_ROOT;PROTO_DIR" "" ${ARGN})
+    if(NOT ARG_GEN_ROOT OR NOT ARG_PROTO_DIR)
+        message(FATAL_ERROR "add_protobuf_generation() 需要提供 GEN_ROOT 和 PROTO_DIR")
+    endif()
+
+    # 根生成目录下新建 proto 子目录
+    set(proto_gen_dir "${ARG_GEN_ROOT}/proto")
+    file(MAKE_DIRECTORY "${proto_gen_dir}")
+
+    # 递归收集所有 proto 源文件（相对 ARG_PROTO_DIR）
+    file(GLOB_RECURSE proto_files RELATIVE "${ARG_PROTO_DIR}" "${ARG_PROTO_DIR}/*.proto")
+    if(NOT proto_files)
+        message(FATAL_ERROR "在 ${ARG_PROTO_DIR} 里没有找到 .proto 文件")
+    endif()
+
+    set(generated_srcs "")
+    set(generated_hdrs "")
+
+    # 循环生成每个 proto 的 cc/h 文件
+    foreach(proto_rel IN LISTS proto_files)
+        get_filename_component(proto_dir  "${proto_rel}" DIRECTORY) # proto 所在路径
+        get_filename_component(proto_name "${proto_rel}" NAME_WE)  # proto 文件名，不带扩展
+
+        # 仿照 proto 源目录结构生成输出目录
+        set(out_dir "${proto_gen_dir}/${proto_dir}")
+        set(out_cc "${out_dir}/${proto_name}.pb.cc")
+        set(out_h   "${out_dir}/${proto_name}.pb.h")
+        file(MAKE_DIRECTORY "${out_dir}") # 确保目录存在
+
+        add_custom_command(
+            OUTPUT "${out_cc}" "${out_h}"
+            COMMAND protobuf::protoc
+                    --cpp_out=${proto_gen_dir}
+                    --proto_path=${ARG_PROTO_DIR}
+                    "${ARG_PROTO_DIR}/${proto_rel}"
+            DEPENDS "${ARG_PROTO_DIR}/${proto_rel}" protobuf::protoc
+            COMMENT "protoc → ${proto_rel}" # 命令输出提示
+            VERBATIM                       # 不要解析命令中的特殊字符
+            USES_TERMINAL                  # 直接输出到终端，方便调试
+        )
+        list(APPEND generated_srcs "${out_cc}") # 收集生成的 cpp
+        list(APPEND generated_hdrs "${out_h}")   # 收集生成的 h
+    endforeach()
+
+    # 将生成的文件列表写入父级作用域
+    set(PROTOBUF_GENERATED_SRCS ${generated_srcs} PARENT_SCOPE)
+    set(PROTOBUF_GENERATED_HDRS ${generated_hdrs} PARENT_SCOPE)
+    set(PROTOBUF_GEN_ROOT ${ARG_GEN_ROOT} PARENT_SCOPE)
+endfunction()
+
+# ====================== 可执行目标生成函数 ======================
+function(add_cpp_executable target_name sources)
+    add_executable(${target_name}
+        ${sources}
+        ${PROTOBUF_GENERATED_SRCS} # 自动包含 protobuf 生成的 cpp
+    )
+
+    target_include_directories(${target_name} PRIVATE 
+        ${GEN_ROOT}                                     # protobuf 生成头文件目录
+        "${CMAKE_SOURCE_DIR}/include"                   # 公共头文件
+        "${CMAKE_SOURCE_DIR}/include/${target_name}"    # 每个模块自己的头文件
+    )
+
+    # 根据 CMAKE_CXX_EXTENSIONS 打开 GNU 扩展相关宏
+    if(CMAKE_CXX_EXTENSIONS)
+        target_compile_definitions(${target_name} PRIVATE _GNU_SOURCE)
+    endif()
+
+    target_compile_options(${target_name} PRIVATE
+        -Wall -Wextra -Wpedantic -Werror       # 严格警告
+        -g3 -O0                                # Debug 信息
+        -fno-omit-frame-pointer
+        -fstandalone-debug
+        -stdlib=libc++                          # 强制使用 libc++
+        -grecord-gcc-switches
+        -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
+        -fno-eliminate-unused-debug-types
+        -fdebug-types-section
+    )
+
+    # 链接库
+    target_link_libraries(${target_name} PRIVATE
+        protobuf::libprotobuf
+        absl::strings
+        absl::log
+        ${BOOST_LIBRARIES_TO_LINK}         
+        Threads::Threads
+        c++
+        c++abi
+    )
+
+    # 谷歌为了兼容苹果, 其 absl 使用了苹果内部的一个非标准语法
+    # protoc 生成的代码依赖于 absl, 所以也用了这个语法
+    # llvm 是苹果的, 它认识这个语法, 但也知道这不是标准的
+    # 发出警告, 严格警告, 编译崩溃
+    # 对 *.pb.* 硬性取消这种语法检查
+    # GUN 因为用的是标准语法, 所以根本不进行语法检查, 反而没事
+    set_source_files_properties(
+        ${PROTOBUF_GENERATED_SRCS}
+        PROPERTIES
+        COMPILE_FLAGS "-Wno-nullability-extension"
+    )
+
+    message(STATUS "已添加可执行目标 → ${target_name}")
+endfunction()
+
+# ====================== 自定义清理指令 ======================
+if(CMAKE_GENERATOR STREQUAL "Ninja")
+    # 创建一个自定义目标，依赖于默认 clean
+    add_custom_target(clean_all
+        # 执行 Ninja 的默认 clean
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+        # 删除 protobuf 生成目录
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${GEN_ROOT}"
+    )
+endif()
+
+
+# ====================== 生成 protobuf 代码 ======================
+add_protobuf_generation(
+    GEN_ROOT ${GEN_ROOT}
+    PROTO_DIR ${PROTO_DIR}
+)
+
+# ====================== 添加可执行目标 ======================
+add_cpp_executable(server ${SERVER_SOURCES})
+add_cpp_executable(client ${CLIENT_SOURCES})
+
+message(STATUS "============================================ 编译信息 ============================================")
+message(STATUS "源码根目录 : ${SOURCE_DIR}")
+message(STATUS "头文件根目录 : ${INCLUDE_DIR}")
+message(STATUS "proto目录 : ${PROTO_DIR}")
+message(STATUS "生成目录 : ${GEN_ROOT}")
+message(STATUS "编译器 : ${CMAKE_CXX_COMPILER}")
+message(STATUS "C++ 标准库 : libc++")
+message(STATUS "C++ 标准 : C++${CMAKE_CXX_STANDARD}")
+
+# 统一输出 C++ 扩展状态
+if(CMAKE_CXX_EXTENSIONS)
+    message(STATUS "GNU 扩展 : ON (C++ 扩展已启用, _GNU_SOURCE 已定义)")
+else()
+    message(STATUS "GNU 扩展 : OFF (C++ 扩展未启用)")
+endif()
+
+message(STATUS "构建类型 : ${CMAKE_BUILD_TYPE}")
+message(STATUS "compile_commands: ${CMAKE_EXPORT_COMPILE_COMMANDS}")
+
+# 动态输出 Boost 组件开关状态
+message(STATUS "Boost 组件开关 :")
+set(BOOST_OPTIONS_LIST
+    USE_BOOST_SYSTEM
+    USE_BOOST_FILESYSTEM
+    USE_BOOST_THREAD
+    USE_BOOST_LOG
+    USE_BOOST_LOG_SETUP
+    USE_BOOST_PROGRAM_OPTIONS
+    USE_BOOST_ASIO
+    USE_BOOST_BEAST
+    USE_BOOST_JSON
+    USE_BOOST_REGEX
+    USE_BOOST_IOSTREAMS
+    USE_BOOST_SERIALIZATION
+    USE_BOOST_ATOMIC
+)
+
+foreach(opt IN LISTS BOOST_OPTIONS_LIST)
+    # 使用 CMake 的变量引用机制
+    if(DEFINED ${opt})
+        message(STATUS "  ${opt} = ${${opt}}")
+    endif()
+endforeach()
+
+```
+
+接着为了能构建成功, 我们必须要给两个`main.cpp`写上空的`main()`, `calculator.proto`也要先写上, 关于`calculator.proto`的具体含义, 我们会在写会话层之后再细说, 现在你就把他写上吧.
+
+```protobuf
+edition = "2024";
+
+package calc;
+
+// ===============================
+// 1. 运算请求（REQUEST）
+// ===============================
+message CalcRequest {
+  double left = 1;
+  string op   = 2;   // "+", "-", "*", "/"
+  double right = 3;
+}
+
+// ===============================
+// 2. 运算应答（RESPONSE）
+// ===============================
+message CalcResponse {
+
+  enum StatusCode {
+    SUCCESS          = 0; // 一切正常，包括除零（返回 ±inf）
+    INVALID_OPERATOR = 1; // 操作符不存在
+    OVERFLOW         = 2; // 运算结果溢出（加减乘除均可）
+  }
+
+  double result = 1;         // 包含 +inf, -inf
+  StatusCode status_code = 2;
+  string message = 3;        // 对错误附加说明
+}
+
+// ===============================
+// 3. 会话层错误（ERROR）
+// ===============================
+message CalcError {
+
+  enum ErrorCode {
+    UNKNOWN_ERROR            = 0;
+    REQUEST_DESERIALIZE_FAIL = 1;
+    RESPONSE_SERIALIZE_FAIL  = 2;
+  }
+
+  ErrorCode session_code = 1;
+  string description = 2;
+}
+
+```
+
+此时, 我们就已经可以构建项目了
+
+```shell
+[whisper@starry-sky reactor]$ cd build/
+[whisper@starry-sky build]$ export CXX=clang++
+[whisper@starry-sky build]$ cmake .. -G Ninja
+-- The CXX compiler identification is Clang 21.1.8
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Found ZLIB: /usr/lib/x86_64-linux-gnu/libz.so (found version "1.3")  
+-- Found Boost: /opt/libcxx-pkgs/lib/cmake/Boost-1.89.0/BoostConfig.cmake (found version "1.89.0") found components: system filesystem thread log log_setup program_options 
+-- 已添加可执行目标 → server
+-- 已添加可执行目标 → client
+-- ============================================ 编译信息 ============================================
+-- 源码根目录 : /home/whisper/network/reactor/src
+-- 头文件根目录 : /home/whisper/network/reactor/include
+-- proto目录 : /home/whisper/network/reactor/proto
+-- 生成目录 : /home/whisper/network/reactor/build/gen
+-- 编译器 : /usr/bin/clang++
+-- C++ 标准库 : libc++
+-- C++ 标准 : C++20
+-- GNU 扩展 : OFF (C++ 扩展未启用)
+-- 构建类型 : Debug
+-- compile_commands: ON
+-- Boost 组件开关 :
+--   USE_BOOST_SYSTEM = ON
+--   USE_BOOST_FILESYSTEM = ON
+--   USE_BOOST_THREAD = ON
+--   USE_BOOST_LOG = ON
+--   USE_BOOST_LOG_SETUP = ON
+--   USE_BOOST_PROGRAM_OPTIONS = ON
+--   USE_BOOST_ASIO = OFF
+--   USE_BOOST_BEAST = OFF
+--   USE_BOOST_JSON = OFF
+--   USE_BOOST_REGEX = OFF
+--   USE_BOOST_IOSTREAMS = OFF
+--   USE_BOOST_SERIALIZATION = OFF
+--   USE_BOOST_ATOMIC = OFF
+-- Configuring done (0.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/whisper/network/reactor/build
+[whisper@starry-sky build]$ cmake --build .
+[0/2] Re-checking globbed directories...
+[0/7] protoc → calculator.proto
+[7/7] Linking CXX executable server
+[whisper@starry-sky build]$ 
+
+```
+
+不过你们那边的`build`回显内容可能和我不一样, 毕竟我这个已经完全写好了
+
+如果你不想每次`cmake`初始化前都`export CXX=clang++`, 可以把它写到`~/.bashrc`里面以持久化, 这样以后都默认用`clang++`做`C++`编译器了
+
+我们首先看`Connection.hpp`这个源文件. 
+
+其中`class Connection`从名字上就很直观，它就是一个 **连接或会话的抽象**。它的核心作用是把操作系统层面的 `socket` 封装成一个应用层对象，并为它提供完整的事件回调体系。每个连接都会存储自己的地址、端口、缓冲区，以及一系列标志位，用来描述连接的状态和属性，这些标志位在后续代码里非常关键。
+
+此外，`Connection` 提供了统一的事件处理接口，几乎所有与 IO 相关的操作、注册和注销动作，都是通过回调触发的。这让上层应用可以完全专注于业务逻辑，而不用直接处理底层的 `epoll` 或 `socket` 细节。
+
+首先，需要理解 `enable_shared_from_this` 的作用。(第10行, 是一个前置声明, 因为接下来的`Connection`我们需要用到`tcp_server`的指针, 不写编译器就无法识别这个指针类型)
+
+![image-20251204230446507](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204230446507.png)
+
+`Connection` 类继承自 `std::enable_shared_from_this<Connection>`，它提供了一个非常重要的方法 `shared_from_this()`，允许对象在自身内部安全地获取指向自己的 `shared_ptr`。
+
+使用这个方法有一个前提：**对象本身必须已经被 `shared_ptr` 管理**。否则调用 `shared_from_this()` 会导致未定义行为。正因为这个限制，`Connection` 的设计强制要求**所有对象必须通过 `shared_ptr` 创建和管理**，而不能在栈上或通过裸指针直接创建。
+
+那如何实现这一点呢？解决方案是 **工厂模式**：
+
+![image-20251204231551458](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204231551458.png)
+
+- 将 `Connection` 的所有构造函数私有化，外界无法直接栈上创建或 `new` 对象。
+- 提供静态方法 `create()` 来实例化对象，并统一返回 `shared_ptr<Connection>`。
+- 这样，任何通过 `create()` 生成的对象都满足 `shared_from_this()` 的使用条件，从而保证回调中安全获取自身指针。
+
+接着，看一下 `Connection` 中使用的主要类型：
+
+![image-20251204232140091](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204232140091.png)
+
+在这里，需要特别注意的有两个 `function` 类型和两个自身指针类型。`function_base` 表示外界传入的回调函数类型，是会话层提供的接口，而 `function` 则表示 `Connection` 内部实际存储的回调类型，用于在事件触发时执行。由于回调方法来自会话层，为了让会话层能够控制具体连接的行为，回调函数必须携带连接对象的引用，因此回调参数中选择使用 `weak_ptr`。
+
+这样设计的原因很明确：所有连接对象都由 `tcp_server` 创建并管理，它是连接生命周期的唯一“主人”。其它组件只能使用连接对象的资源，但不能延长或干扰它的生命周期。`weak_ptr` 在这里正好满足这个要求，它只拥有资源访问权，而不参与生命周期管理。必须注意，绝对不能在回调或外部组件中使用 `shared_ptr`，否则可能造成引用计数混乱或循环引用。
+
+接下来我们看看成员字段:
+
+![image-20251204234154475](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251204234154475.png)
+
+`_socket` 保存底层的文件描述符，是连接与操作系统交互的核心标识。`_is_register` 是一个标志位，用来判断该连接是否已经注册到 `tcp_server`。这里的注册实质上是将 `Connection` 放入 `tcp_server` 的管理器中，从而确保连接对象的引用计数不会归零被释放，保证生命周期的安全。`_write`标记位用于判断是否关心过写事件, 这是一个很关键的标志位, 没有它会出现很严重的 Bug.
+
+`_addr` 和 `_port` 本身没有直接功能，只是顺手记录连接的地址和端口信息。`_inBuff` 和 `_outBuff` 是应用层的收发缓冲区，用于存储数据。接下来是一系列回调函数，用于处理不同类型的事件。最后，`_server` 保存了指向 `tcp_server` 的 `weak_ptr`，使得 `Connection` 可以在需要时访问 `tcp_server` 的资源，从而配合回调方法完成特定操作，但又不会干扰 `tcp_server` 的生命周期管理。
+
+接下是`Connection`的成员函数, 其中的绝大多数方法就是设置回调和执行回调
+
+![image-20251205003948161](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205003948161.png)
+
+![image-20251205004150421](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205004150421.png)
+
+![image-20251205004228051](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205004228051.png)
+
+接下来我们看`EpollerItem.hpp `.
+
+`EpollerItem` 本质上就是对系统原生的 `struct epoll_event` 做了一层轻量封装。原因很简单：`epoll_event` 是个纯 C 结构体，字段混在一起，用起来既不方便，也缺乏面向对象的组织形式；于是这里包了一层壳，让它能更自然地跟我们的 `tcp_server`、`Connection` 这些组件配合工作。
+
+不过，一旦你试图包装 `epoll_event`，立刻就会遇到一个非常严格的限制：**它的内存布局必须和系统给的 `epoll_event` 完全一致**。为什么？因为 `epoll` 内核接口要求你传进去的“事件对象”必须严格按照它的布局读取，一旦你在外面加点别的字段，或者类里出现虚表、继承之类会改变布局的东西，内核读到的内容就会错位，从而直接导致未定义行为。所以 `EpollerItem` 的结构非常简单：类体里只放一个 `epoll_event`，也不允许继承，是一个真正的“透明外壳”。
+
+![image-20251205005543434](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205005543434.png)
+
+为了跟上层逻辑解耦，这个类被写成了模板类。这样我们可以把任何类型的“连接”对象塞进 `epoll` 的 `data.ptr` 位置，比如这里我们用的是用户定义的 `Connection`。外侧则用一个简单的布局检查函数，通过 `static_assert` 来验证：无论模板参数是什么，实例化后的 `EpollerItem<T>` 都必须在大小和对齐方式上完全等同于 `epoll_event`，这样 `epoll` 才能正常工作。
+
+在内部实现上，类里准备了一组 `constexpr` 事件常量，对系统的原生宏进行封装，使后续书写事件组合时语义更清晰一些。
+
+![image-20251205010239471](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205010239471.png)
+
+它的关键方法就三个: 
+
+- 一个把 `events` 返回出去（由于后面要频繁修改事件标志，所以直接用引用返回）；
+- 一个返回裸指针，把我们模板参数指定的连接对象取出来；
+- 一个事件解析函数，可以把事件位字段转成可读字符串，便于调试或打印日志时查看。
+
+![image-20251205010639750](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205010639750.png)
+
+接下来是`Epoller.hpp`
+
+`Epoller` 的定位很好理解：它就是对原生 epoll 接口做的一层更友好的封装。系统给的 `epoll_ctl` 虽然功能齐全，但通过 `EPOLL_CTL_ADD / MOD / DEL` 这样的控制命令来操作，读起来不够直观，也很容易在参数顺序上出错。因此在这里，整个接口被重新整理成了三个方法：`add`、`mod` 和 `del`，语义清晰，调用方式也和我们自己的逻辑结构更加一致。
+
+和前面一样，所有连接相关的参数全部使用 `weak_ptr` 传进来，而真正操作时再临时转成 `shared_ptr`。这么做是为了保持生命周期的单向性：`Connection` 的寿命完全由 `tcp_server` 管理，`epoll` 模型只是引用它，但永远不能反过来延长它的生命周期，否则一个连接可能因为“被 `epoll` 阻止释放”而变成僵尸连接。弱引用刚好符合 `epoll` 的使用场景：需要访问对象，但不拥有对象。
+
+`Epoller` 内部只维护两个字段：`_size` 和 `_epfd`。`_size` 控制 `epoll_wait` 每次最多回收多少事件，这里被放在构造函数参数里，方便外部调节；`_epfd` 则是 `epoll` 句柄本身，使用 `EPOLL_CLOEXEC` 打开，防止进程替换时句柄泄露。epoll 的内部结构很重（红黑树、就绪队列等），不关闭就让新进程白白继承，显然是错误的。
+
+在三个方法内部，整体逻辑都非常直接：生成一个 `EpollerItem` 做外壳，把事件和指向 `Connection` 的裸指针传进去，然后丢给 `epoll_ctl`。真正唯一需要注意的是那句：
+
+```
+con->need_write_interest() = event & EpollerItem::outwritable;
+```
+
+这是 `epoll` 模型的一个细节：**是否关心可写事件是一个动态变化的状态**。某些情况下我们需要监听可写事件（比如发送缓冲区没清完），某些情况下则不需要。为了让 `Connection` 随时知道自己现在是不是关注可写事件，这里在 `add` 和 `mod` 阶段做了自动同步，确保事件标志和连接自身的状态一致。
+
+![image-20251205012707409](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205012707409.png)
+
+![image-20251205012733274](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205012733274.png)
+
+上面我们继承了一个`NonCopy`, 它其实就是一个空类型, 里面没有字段, 但是禁止了拷贝方法, 由于基类是不可拷贝的, 所以`Epoller`自然也就不可以拷贝了, 这样可以稍微省点力气, 少写两行代码
+
+![image-20251205013914172](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205013914172.png)
+
+接下来是`tcp_protocol.hpp`
+
+`tcp_protocol.hpp` 的作用，是作为服务端会话层 `tcp_server` 和客户端会话层 `tcp_client` 共同继承的基类，用来放置两端都会用到的静态方法，同时也提供一个统一的生命周期接口。类里有两个虚函数，一个是析构函数，另一个是 `run()`，后者会在具体的会话层中被重写，用来作为服务启动的入口，让服务端和客户端在各自的逻辑中进入网络 IO 主循环。协议层本身并不关心具体怎么跑，只是统一了进入和退出运行状态的时机，子类再在这个框架下扩展自己的行为。
+
+类中还内置了服务器地址和端口号，作为一份可以被两端共享的默认配置，避免服务器端和客户端各写一份。除此之外，其他内容基本都属于纯粹的“工具属性”，例如拼接 `sockaddr_in`、清零结构体、打开 socket、设置复用、绑定端口、监听、连接等，这些都是两端都会频繁用到的底层操作，抽出来放在这里能避免重复代码，也让上层关注在业务逻辑而不是系统调用细节。
+
+这个文件里用到的日志是 `Boost` 的全局日志模块。尽管我后来重写过一个更正式、可用于生产环境的日志系统，但考虑到 `Boost` 本身的成熟度和生态，协议层依然选择使用 `Boost`。一方面是为了减少依赖，另一方面也便于移植和测试，再加上 `Boost.Log` 本身就足够稳定，所以放在这里是更合适的。
+
+整体而言，这个文件承担的角色更像一个“协议工具箱”，它定义了会话层共同依赖的部分，同时又为 `tcp_server` 和 `tcp_client` 留下可扩展的主体入口。代码本身我们已经写了很多次，这里也没太多新的内容，结构清晰即可，亮点主要在日志的选择和公共逻辑的抽象方式。
+
+```cpp
+#pragma once
+
+#include <arpa/inet.h>   // 引入 htons 接口, inet_aton 接口
+#include <netinet/in.h>  // 引入 in_port_t, sockaddr_in
+#include <sys/socket.h>  // 引入 socket 接口, AF_INET, SOCK_STREAM, bind 接口, listen 接口, accept 接口, connect 接口
+
+#include <boost/log/trivial.hpp>  // 引入Boost全局日志宏
+#include <cstdlib>                // 引入 exit 接口
+#include <cstring>                // bzero
+#include <format>
+#include <memory>  // 引入智能指针
+#include <string>
+#include <system_error>
+
+#include "Connection.hpp"
+
+class tcp_protocol {
+   protected:
+    using addr = std::string;
+    using port = ::in_port_t;
+    using connection = Connection;
+    using sockaddr = ::sockaddr_in;
+    using connect_shared_ptr = connection::self_shared_ptr;
+    using connect_weak_ptr = connection::self_weak_ptr;
+
+   public:
+    tcp_protocol() : _is_running(false) {}
+
+    virtual ~tcp_protocol() = default;
+
+    virtual void run() {
+        start_running();
+        stop_running();
+    }
+
+    bool is_running() {
+        return _is_running;
+    }
+
+   protected:
+    void start_running() {
+        BOOST_LOG_TRIVIAL(info) << std::format("程序正在运行, 已经进入网络IO主逻辑");
+        _is_running = true;
+    }
+
+    void stop_running() {
+        BOOST_LOG_TRIVIAL(info) << std::format("程序退出IO主逻辑");
+        _is_running = false;
+    }
+
+    static void listen(connect_weak_ptr connect, int backlog = 5) {
+        auto socket = connect.lock();
+        int ret = ::listen(socket->file(), backlog);
+        if (ret < 0) {
+            throw std::system_error(
+                errno, std::generic_category(),
+                std::format("套接字描述符({})设置监听状态失败: ", socket->file()));
+        }
+        BOOST_LOG_TRIVIAL(info) << std::format("描述符为{}的套接字设置监听状态成功",
+                                               socket->file());
+    }
+
+    static int accept(connect_weak_ptr connect, sockaddr& user_sockaddr) {
+        auto socket = connect.lock();
+        socklen_t len = static_cast<socklen_t>(sizeof(user_sockaddr));
+        auto user_socket =
+            ::accept(socket->file(), reinterpret_cast<::sockaddr*>(&user_sockaddr), &len);
+        if (user_socket >= 0) {
+            BOOST_LOG_TRIVIAL(info) << std::format("接收到一个描述符为{}的用户连接", user_socket);
+        }
+        return user_socket;
+    }
+
+    static int socket_init() {
+        auto socket = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (socket < 0) {
+            throw std::system_error(errno, std::generic_category(), "套接字打开失败");
+        } else {
+            BOOST_LOG_TRIVIAL(info) << std::format("套接字打开成功, 文件描述符为: {}", socket);
+            int optval = 1;
+            if (::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+                BOOST_LOG_TRIVIAL(error) << std::format("设置 套接字复用失败: {}", strerror(errno));
+                ::close(socket);
+                exit(errno);
+            }
+        }
+        return socket;
+    }
+
+    static addr inet_ntop(const sockaddr& sockaddr) {
+        char buffer[32];
+        ::inet_ntop(AF_INET, &sockaddr.sin_addr, buffer, sizeof(buffer));
+        return buffer;
+    }
+
+    static void bzero(sockaddr& sockaddr) {
+        ::bzero(&sockaddr, sizeof(sockaddr));
+    }
+
+    static void sockaddr_in_init(sockaddr& sockaddr, const addr& addr, port port) {
+        tcp_protocol::bzero(sockaddr);
+        sockaddr.sin_family = AF_INET;
+        sockaddr.sin_port = ::htons(port);
+        ::inet_aton(addr.c_str(), &sockaddr.sin_addr);
+        BOOST_LOG_TRIVIAL(info) << std::format("拼接了这样的一个套接字: \"{}:{}\"", addr,
+                                               std::to_string(port));
+    }
+
+    static void bind_port(connect_weak_ptr connect, const sockaddr& sockaddr) {
+        auto socket = connect.lock();
+        int ret = ::bind(socket->file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
+                         static_cast<::socklen_t>(sizeof(sockaddr)));
+        if (ret != 0) {
+            throw std::system_error(errno, std::generic_category(),
+                                    std::format("套接字({})绑定端口错误: ", socket->file()));
+        }
+
+        BOOST_LOG_TRIVIAL(info) << std::format("对于{}套接字描述符已经绑定成功", socket->file());
+    }
+
+    static bool connect(connect_weak_ptr connect, const addr& addr = tcp_protocol::_server_addr,
+                        port port = tcp_protocol::_server_port) {
+        auto socket = connect.lock();
+        sockaddr sockaddr;
+        tcp_protocol::sockaddr_in_init(sockaddr, addr, port);
+        int ret = ::connect(socket->file(), reinterpret_cast<const ::sockaddr*>(&sockaddr),
+                            static_cast<::socklen_t>(sizeof(sockaddr)));
+        if (ret < 0) {
+            BOOST_LOG_TRIVIAL(error) << std::format("对于服务器\"{}:{}\"的连接出现了错误: {}", addr,
+                                                    port, strerror(errno));
+            return false;
+        }
+        BOOST_LOG_TRIVIAL(info) << std::format("服务器\"{}:{}\"已经获取了我方连接", addr, port);
+        return true;
+    }
+
+   private:
+    bool _is_running;
+
+   public:
+    inline static addr _server_addr = "47.107.254.122";
+    inline static port _server_port = 8080;
+};
+
+```
+
+既然前面提到了日志，这里顺带把 `boost_log.hpp` 也说一下。`Boost.Log` 本身是非常强大的日志库，但对应地，它并不是开箱即用的，想用好它就必须进行一套完整的初始化配置，这个文件做的事情就是把那套配置封装成一个可以随时调用的初始化函数，让日志系统能够在不同启动方式下工作得合理、干净、符合预期。
+
+它的核心逻辑其实很简单：如果程序是在项目目录里直接以调试的方式启动，日志就直接落在当前目录；但如果是以守护进程的方式运行，比如被 systemd 启动，那么工作目录往往就是根目录 `/`，这种情况下日志就不应该再写到当前目录，而是直接写到 `/var/log` 这种系统专门放日志的地方。这个判断逻辑被自动处理掉了，也就是说，用户无需关心自己是“前台运行还是后台运行”，日志最终都会去到合适的位置。
+
+在确定好目录之后，代码会确保日志路径存在，如果是守护进程模式，却因为权限等问题导致目录无法创建，就会直接向所有终端广播错误信息，并退出程序，避免继续运行导致后续日志无法落盘。此外，系统日志目录本身的权限也会被调整，所有者固定为 root，管理组为 adm，这样普通用户依旧可以查看日志，符合 Linux 系统服务的惯例。
+
+文件落地方面，日志采用按大小滚动的方式，每个文件 10MB，命名格式为 `app_%N.log`。无论是第一次创建文件还是之后的滚动创建，都会自动同步权限，避免出现 root 创建的日志文件反而无法被用户查看的情况。与此同时，也会自动加载通用属性，例如时间戳，这些东西在日志里原本就不可少，所以初始化阶段统一设置好即可。
+
+最后一个小细节是信号处理。调试时大家都习惯直接 `Ctrl + C` 杀掉程序，如果不额外处理，日志缓存可能来不及刷盘就退出了。这里特地对 `SIGINT` 做了简单封装，收到信号时先输出一条日志，然后主动 flush 一次，这样调试阶段的输出就不会丢失。整个过程都尽量透明，不干扰主逻辑，但又保证最基本的日志完整性。
+
+整体来说，这个文件就是把 `Boost.Log` 的配置“整理成一次性搞定”的模式：调试和守护都能用、权限自动处理、文件滚动自动处理、终止自动落地。这些东西本身并不复杂，但写在一起之后，就让整个项目的日志行为既专业又省心。
+
+```cpp
+#pragma once
+#include <fcntl.h>   // open
+#include <grp.h>     // getgrnam
+#include <limits.h>  // PATH_MAX
+#include <signal.h>
+#include <sys/stat.h>  // 调整目录权限状态
+
+#include <boost/filesystem.hpp>                           // 目录创建
+#include <boost/log/trivial.hpp>                          // 引入Boost全局日志宏
+#include <boost/log/utility/setup/common_attributes.hpp>  // 引入一些常见的日志属性, 如时间戳, 执行流ID
+#include <boost/log/utility/setup/console.hpp>            // 可将日志输出到终端
+#include <boost/log/utility/setup/file.hpp>               // 可将日志输出到文件
+#include <format>
+#include <string>
+
+inline void init_logging() {
+    // 标准输出
+    boost::log::add_console_log(
+        std::cout, boost::log::keywords::format = "[%TimeStamp%] [%Severity%] %Message%");
+
+    // 工作目录性质判断
+    char cwd[PATH_MAX] = {0};
+    bool is_root_cwd = (::getcwd(cwd, sizeof(cwd)) && std::string(cwd) == "/");
+
+    // 确定日志目录
+    const std::string log_dir = is_root_cwd ? "/var/log/demo" : ".";
+
+    // 确保日志目录存在
+    boost::system::error_code ec;
+    boost::filesystem::create_directories(log_dir, ec);
+    if (is_root_cwd && ec) {
+        std::string message = std::format("日志目录不存在且无法创建: {}", ec.message());
+        // 在所有终端中广播消息
+        for (auto& p : boost::filesystem::directory_iterator("/dev/pts")) {
+            if (p.path().filename() == "ptmx") continue;
+            int fd = ::open(p.path().c_str(), O_WRONLY | O_NONBLOCK);
+            if (fd < 0) continue;
+            ::write(fd, message.c_str(), message.size());
+            ::close(fd);
+        }
+        std::quick_exit(ec.value());
+    }
+
+    // 明确目录的所属关系: 最终所属人为root, 管理组成员(adm)有权查看
+    if (is_root_cwd) {
+        ::chmod(log_dir.c_str(), 0755);
+        struct group* adm_grp = ::getgrnam("adm");
+        gid_t adm_gid = adm_grp ? adm_grp->gr_gid : 4;
+        ::chown(log_dir.c_str(), 0, adm_gid);
+    }
+
+    // 注册一个日志文件落地目标
+    auto sink = boost::log::add_file_log(
+        boost::log::keywords::file_name = log_dir + "/app_%N.log",
+        boost::log::keywords::rotation_size = 10 * 1024 * 1024,  // 文件滚动大小
+        boost::log::keywords::format = "[%TimeStamp%] [%Severity%] %Message%",
+        boost::log::keywords::open_mode = (std::ios_base::out | std::ios_base::app)  // 追加写
+    );
+
+    // 为新文件的创建注册回调函数, 创建后, 同样调整权限
+    if (is_root_cwd) {
+        auto backend = sink->locked_backend();
+
+        // 1. 设置文件收集器（用于滚动）
+        backend->set_file_collector(
+            boost::log::sinks::file::make_collector(boost::log::keywords::target = log_dir));
+        backend->scan_for_files();
+
+        // 2. 首次文件 + 每次滚动后，设置权限
+        backend->set_open_handler([log_dir](std::ostream&) {
+            // 每次打开新文件时，扫描目录下所有 app_*.log
+            boost::system::error_code ec;
+            for (const auto& entry : boost::filesystem::directory_iterator(log_dir, ec)) {
+                if (entry.path().filename().string().rfind("app_", 0) == 0 &&
+                    entry.path().extension() == ".log") {
+                    ::chmod(entry.path().c_str(), 0644);
+                    struct group* g = ::getgrnam("adm");
+                    if (g) ::chown(entry.path().c_str(), 0, g->gr_gid);
+                }
+            }
+        });
+    }
+
+    // 添加通用属性, 如 时间戳
+    boost::log::add_common_attributes();
+
+    // 终止信号发出后自动落地
+    ::signal(SIGINT, [](int) {
+        BOOST_LOG_TRIVIAL(info) << "收到 SIGINT, 退出程序";
+        boost::log::core::get()->flush();
+        ::exit(0);
+    });
+}
+
+```
+
+接下来, 就是关键的关键, `tcp_server.hpp`, 它处于会话层, 负责对客户连接进行管理和多路转接. 让我们细细来看.
+
+
+
+
+
+
+
+
+
+
+
+
 
 我们先把项目框架搭一下, 该拷贝的拷贝, 该新建的新建.  我们使用`cmake`来构建项目
 
@@ -11878,7 +12784,7 @@ target_link_libraries(reactor_client PRIVATE jsoncpp)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 ```
 
-这里我只说一下最后一个, 也就是`set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, 它表示生成一个`clangd`引导文件, 因为我是用clangd这个插件进行语法分析的, 为了让它找到项目中的头文件, 我们需要再让`cmake`生成一个引导文件供`clangd`识别.
+这里我只说一下最后一个, 也就是`set(CMAKE_EXPORT_COMPILE_COMMANDS ON)`, 它表示生成一个`clangd`引导文件, 因为我是用`clangd`这个插件进行语法分析的, 为了让它找到项目中的头文件, 我们需要再让`cmake`生成一个引导文件供`clangd`识别.
 
 其实这个项目就是在写`Reactor`服务器框架, 所以你把项目名换成`Reactor`也是完全可以的.
 
@@ -11912,7 +12818,7 @@ class LoopServer{
 };
 ```
 
-先说一下我这里为什么把连接类写成`struct`, 其实原因很简单, 那就是我这里为了图个方便, 不想再专门写外露接口, 所以直接就用`struct`, 把成员全部公开, 第一个成员`_sock`, 想必不用多说, 就是连接对应的文件描述符, 下面的两个`string`, 相信重名字上也能看出来, 它们就是我们应用层的接收缓冲区和发送缓冲区, 需要特别说明的是, 缓冲区其实不能用`string`, 因为缓冲区里面有时候是二进制数据, 二进制数据里面很可能会有多个`\0`, 此时就会导致出错, 实际上应该用一个`vector<char>`做缓冲区, 但还是为了方便, 因为`vector<char>`需要再专门写一下缓冲区类, 所以还是为了省事, 就不写了.
+先说一下我这里为什么把连接类写成`struct`, 其实原因很简单, 那就是我这里为了图个方便, 不想再专门写外露接口, 所以直接就用`struct`, 把成员全部公开, 第一个成员`_sock`, 想必不用多说, 就是连接对应的文件描述符, 下面的两个`string`, 相信从名字上也能看出来, 它们就是我们应用层的接收缓冲区和发送缓冲区, 需要特别说明的是, 缓冲区其实不能用`string`, 因为缓冲区里面有时候是二进制数据, 二进制数据里面很可能会有多个`\0`, 此时就会导致出错,(后期补: 严谨来说, 这种问题只会在你把字节流首地址直接交给 string 让它以 const char* 的形式作为输入参数时才存在, 但你完全可以用其他的接口, 手动控制追加字节流的长度, 这样就不会有所困扰) 实际上应该用一个`vector<char>`做缓冲区, 但还是为了方便, 因为`vector<char>`需要再专门写一下缓冲区类, 所以还是为了省事, 就不写了.
 
 接着我们需要强调的是, 我们的服务器是分层的, 所以对于哪一层要做什么, 不做什么, 都要有明确的划分, 我们可以看到, 下面三个是回调对象, 分别对应着连接的读方法, 写方法, 异常方法, 这些方法都涉及到具体的IO过程, 因此是`LoopServer`该做的事, 而不应该由`Connection`来做, 以后, 我们会把`LoopServer`中的方法赋到这三个回调对象, 便于对不同的连接进行不同的(倒也不是特别不同)的读写异常方法, 另外, 我们可以看到, 这个调用对象的参数是`weak_ptr<Connection>`, 这是因为这三个回调函数的具体执行时间也和具体的IO场景有关, 所以需要由`LoopServer`来进行决定, 但`LoopServer`里面有很多的连接, 它怎么分得清谁是谁呢? 那就是依靠`weak_ptr<Connection>`这个参数来进行分辨的, 这里最好用`weak_ptr`, 因为`weak_ptr`相当于只有对象的查看权, 但没有使用权, 或者更底层的说, 它不会让底层的引用计数加一, 我们想让连接的生命周期交由`LoopServer`管理, 所以我们不希望, 别的组件长时间拥有这个引用计数.   至于`_server_ptr`, 也很简单, 就是让连接能找到自己的服务器.
 
@@ -11925,7 +12831,7 @@ class LoopServer : public std::enable_shared_from_this<LoopServer> , public NonC
 };
 ```
 
-这里主要想说的是`enable_shared_from_this`, 就目前这个实验性质的项目来说, `NonPocy`你加不加都行, 但`enable_shared_from_this`是一定要继承的, 而且必须是`public`继承方式, 继承它的原因是因为我们的连接对象, 也就是`struct Connection`的声明周期是由`LoopServer`进行管理的, 也就是说, `struct Connection`对象将由`LoopServer`实例化和释放, 实例化的时候就需要对其中的成员进行初始化, 其中就包括`_server_ptr`, 但对于`weak_ptr`来说, 它只能由`shared_ptr`进行初始化, 这个继承的目的就是让`LoopServer`对象拿到自己的`shared_ptr`对象, 遇到具体场景我们再说.
+这里主要想说的是`enable_shared_from_this`, 就目前这个实验性质的项目来说, `NonPocy`你加不加都行, 但`enable_shared_from_this`是一定要继承的, 而且必须是`public`继承方式, 继承它的原因是因为我们的连接对象, 也就是`struct Connection`的生命周期是由`LoopServer`进行管理的, 也就是说, `struct Connection`对象将由`LoopServer`实例化和释放, 实例化的时候就需要对其中的成员进行初始化, 其中就包括`_server_ptr`, 但对于`weak_ptr`来说, 它只能由`shared_ptr`进行初始化, 这个继承的目的就是让`LoopServer`对象拿到自己的`shared_ptr`对象, 遇到具体场景我们再说.
 
 ```cpp
 class LoopServer : public std::enable_shared_from_this<LoopServer>,
