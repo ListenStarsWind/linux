@@ -65,9 +65,7 @@ class tcp_protocol {
         socklen_t len = static_cast<socklen_t>(sizeof(user_sockaddr));
         auto user_socket =
             ::accept(socket->file(), reinterpret_cast<::sockaddr*>(&user_sockaddr), &len);
-        if (user_socket < 0) {
-            BOOST_LOG_TRIVIAL(warning) << std::format("接触到一个异常的用户连接");
-        } else {
+        if (user_socket >= 0) {
             BOOST_LOG_TRIVIAL(info) << std::format("接收到一个描述符为{}的用户连接", user_socket);
         }
         return user_socket;

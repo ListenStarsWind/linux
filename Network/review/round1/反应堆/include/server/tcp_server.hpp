@@ -21,8 +21,7 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
         : _call_back(call_back),
           _listen_addr(addr),
           _listen_port(port),
-          _epoll(std::make_unique<Epoller>(epoll_size)) {
-    }
+          _epoll(std::make_unique<Epoller>(epoll_size)) {}
 
    public:
     ~tcp_server() override = default;
@@ -37,6 +36,7 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
     void run() override {
         start_running();
         while (is_running()) {
+            // BOOST_LOG_TRIVIAL(debug) << std::format("注册的连接个数 {}", _connects.size());
             dispatch(-1);
         }
         stop_running();
@@ -57,8 +57,8 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
             tcp_protocol::sockaddr_in_init(listen_sockaddr, _listen_addr, _listen_port);
             int listen_fd = tcp_protocol::socket_init();
             tcp_server::SetNonBlock(listen_fd);
-            auto listen_socket =
-                connection::create(listen_fd, _listen_addr, _listen_port, shared_from_this());
+            auto listen_socket = connection::create(listen_fd, _listen_addr, _listen_port,
+                                                    shared_from_this(), "监听套接字");
             tcp_protocol::bind_port(listen_socket, listen_sockaddr);
             tcp_protocol::listen(listen_socket);
 
@@ -95,8 +95,9 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
 
         server->_epoll->del(socket);
         server->_connects.erase(it);
-
-        if (socket.use_count() > 2) {
+        // 3: dispatch 一个, 文件错误对端关闭转化为 IO 问题, recv/send lock 一个,
+        // 这个内联函数lock一个
+        if (socket.use_count() > 3) {
             BOOST_LOG_TRIVIAL(error) << "针对连接存在疑似内存泄露现象";
         }
 
@@ -105,12 +106,13 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
     }
 
     void dispatch(int timeout) {
+        // 注意 HUP/EOF 实际上也算作可读事件, 只不过划分更细了
         auto items = _epoll->wait(timeout);
         // BOOST_LOG_TRIVIAL(debug) << std::format("待处理的连接数: {}", items.size());
         for (auto& item : items) {
             // 简化逻辑, 将文件错误和对端关闭统一转换成 IO 问题
-            // BOOST_LOG_TRIVIAL(debug)
-            //     << std::format("事件类型为: {}", EpollerItem::event_name(item.events()));
+            // BOOST_LOG_TRIVIAL(debug) << std::format("一个{}准备好了{}", item.connect()->remark(),
+            //                                         EpollerItem::event_name(item.events()));
             if (item.events() & Epoller::EpollerItem::error) {
                 item.events() |=
                     (Epoller::EpollerItem::inreadable | Epoller::EpollerItem::outwritable);
@@ -168,6 +170,13 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
     static void connect_hangup(connect_weak_ptr connect) {
         connect_common(connect, [&](auto& s) {
             BOOST_LOG_TRIVIAL(info)
+                << std::format("连接(\"{}:{}\")已经完全关闭, 将执行注销回调", s.addr(), s.port());
+        });
+    }
+
+    static void connect_rdhangup(connect_weak_ptr connect) {
+        connect_common(connect, [&](auto& s) {
+            BOOST_LOG_TRIVIAL(info)
                 << std::format("对端(\"{}:{}\")关闭了连接, 将执行注销回调", s.addr(), s.port());
         });
     }
@@ -194,13 +203,15 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
                     tcp_server::SetNonBlock(fd);
                     // 若 new 抛出异常, 就不用考虑了, 那时候应该在意系统
                     auto socket = connection::create(fd, tcp_protocol::inet_ntop(user_sockaddr),
-                                                     user_sockaddr.sin_port, server);
+                                                     user_sockaddr.sin_port, server, "普通套接字");
                     socket->set_register_call(
                         std::bind(tcp_server::connect_register, std::placeholders::_1,
                                   EpollerItem::inreadable | EpollerItem::edge_trigger));
 
                     socket->set_unregister_call(tcp_server::connect_unregister);
 
+                    socket->set_rdh_call(tcp_server::connect_rdhangup);
+                    socket->set_hup_call(tcp_server::connect_hangup);
                     socket->set_err_call(tcp_server::connect_error);
 
                     socket->set_in_call(tcp_server::recv_connect);
@@ -242,13 +253,15 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
             if (n > 0) {
                 socket->inBuff().append(buffer, n);
             } else if (n == 0) {
-                // 对方读端可能还未关闭
-                // 将可能的剩余数据全部输出
+                // 尽管对端已经开启了四次挥手, 连接处于半关闭状态
+                // 但对方的读端不一定关闭
+                // 闲着也是闲着, 把可能存在的数据都给他发过去
                 socket->out_call();
-                // 输出回调中已经注销并关闭了
-                if (!socket->is_register()) return;
-                if (socket->is_closed()) return;
-                socket->hup_call();
+                // 这个连接实际上已经失效, 不需要继续判断
+                if (socket->is_closed()) continue;
+                // 这个连接在会话层已经被注销, 不需要继续判断
+                if (!socket->is_register()) continue;
+                socket->rdh_call();
                 return;
             } else {
                 if (errno == EWOULDBLOCK) {
@@ -269,8 +282,10 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
                 socket->outBuff() += temp;
             } while (!temp.empty() && !socket->inBuff().empty());
             // 新增了写关心
-            server->_epoll->mod(socket, EpollerItem::outwritable | EpollerItem::inreadable |
-                                            EpollerItem::edge_trigger);
+            if (!socket->outBuff().empty()) {
+                server->_epoll->mod(socket, EpollerItem::outwritable | EpollerItem::inreadable |
+                                                EpollerItem::edge_trigger);
+            }
         } catch (std::exception& e) {
             BOOST_LOG_TRIVIAL(error)
                 << std::format("会话层之上出现了无法处理的问题, 将注销该会话: {}", e.what());
@@ -283,7 +298,8 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
         if (!socket) throw std::runtime_error("连接生命周期过早结束");
         auto server = socket->server().lock();
         if (!server) throw std::runtime_error("服务端会话层生命周期过早结束");
-        while (true) {
+
+        while (!socket->outBuff().empty()) {
             ssize_t n =
                 ::send(socket->file(), socket->outBuff().c_str(), socket->outBuff().size(), 0);
             if (n > 0)
@@ -303,8 +319,8 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
                 }
             }
         }
-
-        if (socket->outBuff().empty()) {
+        // 之前 add 或者 mod 关心过写事件, 则现在去除
+        if (socket->need_write_interest() && socket->outBuff().empty()) {
             // 去除写关心
             server->_epoll->mod(socket, EpollerItem::inreadable | EpollerItem::edge_trigger);
         }

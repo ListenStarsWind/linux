@@ -49,6 +49,7 @@ class Epoller : public NonCopy {
         if (n < 0) {
             throw std::system_error(errno, std::generic_category(), "epoll添加事件出错");
         }
+        con->need_write_interest() = event & EpollerItem::outwritable;
     }
 
     void mod(Connection::self_weak_ptr connect, uint32_t event) {
@@ -59,6 +60,7 @@ class Epoller : public NonCopy {
         if (n < 0) {
             throw std::system_error(errno, std::generic_category(), "epoll事件修改出错");
         }
+        con->need_write_interest() = event & EpollerItem::outwritable;
     }
 
     void del(Connection::self_weak_ptr connect) {

@@ -24,8 +24,15 @@ class Connection : public std::enable_shared_from_this<Connection> {
    private:
     Connection() : _socket(-1) {}
 
-    Connection(int socket, const addr_t& addr, port_t port, const std::weak_ptr<tcp_server>& server)
-        : _socket(socket), _is_register(false), _addr(addr), _port(port), _server(server) {}
+    Connection(int socket, const addr_t& addr, port_t port, const std::weak_ptr<tcp_server>& server,
+               const string& remark)
+        : _socket(socket),
+          _is_register(false),
+          _write(false),
+          _remark(remark),
+          _addr(addr),
+          _port(port),
+          _server(server) {}
 
     // 针对客户端的劣化版本
     Connection(int socket) : _socket(socket) {}
@@ -36,8 +43,8 @@ class Connection : public std::enable_shared_from_this<Connection> {
     }
 
     static self_shared_ptr create(int fd, const addr_t& addr, port_t port,
-                                  std::weak_ptr<tcp_server> server) {
-        return self_shared_ptr(new Connection(fd, addr, port, server));
+                                  std::weak_ptr<tcp_server> server, const string& remark = {}) {
+        return self_shared_ptr(new Connection(fd, addr, port, server, remark));
     }
 
     static self_shared_ptr create(int socket) {
@@ -93,6 +100,12 @@ class Connection : public std::enable_shared_from_this<Connection> {
         }
     }
 
+    void set_rdh_call(const function_base& call) {
+        if (call) {
+            _rdh_call = std::bind(call, weak_from_this());
+        }
+    }
+
     void set_unregister_call(const function_base& call) {
         if (call) {
             _unregister_call = std::bind(call, weak_from_this());
@@ -135,6 +148,12 @@ class Connection : public std::enable_shared_from_this<Connection> {
         }
     }
 
+    void rdh_call() {
+        if (_rdh_call) {
+            _rdh_call();
+        }
+    }
+
     void register_call() {
         if (_register_call) {
             _is_register = true;
@@ -173,6 +192,10 @@ class Connection : public std::enable_shared_from_this<Connection> {
         return _addr;
     }
 
+    const string& remark() {
+        return _remark;
+    }
+
     port_t port() const {
         return _port;
     }
@@ -185,9 +208,16 @@ class Connection : public std::enable_shared_from_this<Connection> {
         return _outBuff;
     }
 
+    // 不需要手动设置, Epoller add mod 方法中自动设置的
+    bool& need_write_interest() {
+        return _write;
+    }
+
    private:
     socket _socket;
     bool _is_register;
+    bool _write;
+    string _remark;
     string _addr;
     port_t _port;
     string _inBuff;
@@ -197,7 +227,8 @@ class Connection : public std::enable_shared_from_this<Connection> {
     function _out_call;         // epoll 事件可写时调用
     function _pri_call;         // epoll 紧急数据可读时调用
     function _err_call;         // epoll 错误事件时调用
-    function _hup_call;         // epoll 对端关闭事件调用
+    function _hup_call;         // epoll 完全关闭事件调用
+    function _rdh_call;         // epoll 对端关闭事件调用
     function _register_call;    // 当Connection 被加入会话层时调用
     function _unregister_call;  // 当Connection 被移除会话层时调用
 
