@@ -12720,19 +12720,224 @@ inline void init_logging() {
 
 ```
 
-接下来, 就是关键的关键, `tcp_server.hpp`, 它处于会话层, 负责对客户连接进行管理和多路转接. 让我们细细来看.
+接下来, 就是关键的关键, `tcp_server.hpp`, 
 
+`tcp_server.hpp` 的核心作用是会话层：管理客户端连接并进行多路转接。和 `Connection` 一样，`tcp_server` 也继承自 `std::enable_shared_from_this<tcp_server>`，这意味着它采用同样的构造惯例——通过静态工厂函数统一创建并返回 `shared_ptr`，从而把生命周期交给智能指针管理。需要特别注意的是 `init()` 的调用时机：`init()` 内部会使用 `shared_from_this()`，因此它必须在 `tcp_server` 已经被 `shared_ptr` 托管之后才调用；工厂函数在 new 之后调用 `init()` 并返回 `shared_ptr`，正是为保证这一点而存在的。
 
+![image-20251205141059275](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205141059275.png)
 
+这里唯一需要留心的，就是 `init()` 的调用时机。`init()` 里会使用 `shared_from_this()`，而这个函数只有在对象已经处于 `shared_ptr` 的管理之下时才是合法的；如果对象还没有被智能指针接管就调用它，程序会直接崩掉。所以整个初始化流程必须保证：`tcp_server` 先由工厂函数创建并立刻交由 `shared_ptr` 托管，随后再调用 `init()` 完成真正的启动动作。这样既保持了生命周期管理的一致性，也避免了构造早期因“裸对象”调用 `shared_from_this()` 而导致的未定义行为。.
 
+接下来我们再看看类型
 
+![image-20251205141413840](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205141413840.png)
 
+`Epoller`里的`item`已经是展开的具体类型, 而不是模版, 在这里我们再次声明一下, 方便之后我们拿到其中的事件常量, `on_event_call_t`是`tcp_server`实际传入的事件回调, `on_message_call_t`则是更高层给`tcp_server`的回调函数, 用来接收客户端的请求并返回应答报文, `connects`则是事件管理器, 它会把`connect`的`shared_ptr`存储起来, 确保它们不会被提前释放, 为了便于访问, 这里使用的是哈希表, 以裸指针作为`key`类型.
 
+弄清类型之后, 字段的含义就不言而喻了.
 
+![image-20251205142246004](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205142246004.png)
 
+![image-20251205142621313](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205142621313.png)
 
+`init` 的核心任务就是把监听套接字配置完整。往细处讲，它要完成底层的端口绑定、监听状态的建立、为 `connection` 注册一整套回调方法，并最终把这个监听套接字本身注册进 `tcp_server` 的事件体系里。由于这些初始化步骤牵涉到服务启动的最基础部分，任何一步抛出异常，都不再有恢复余地，因此直接终止进程是最干脆的处理方式。
 
+监听套接字本质上也是一种“可读”源，因为它的 `accept` 行为就是把传输层就绪队列中的连接取到应用层。为了能把就绪队列读干净，我们必须把监听套接字设为非阻塞。只有这样，在队列被取空后，`accept` 才能立刻返回负数并设置 `errno` 为 `EWOULDBLOCK`，从而让事件循环继续下去，而不是傻等在那里。
 
+![image-20251205144050096](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205144050096.png)
+
+至于现在的各种回调方法的具体内容, 我们等到普通套接字的时候再一起来看
+
+`run()` 的本质就是不断地循环事件派发。这里传入的 `-1` 是 `epoll::wait` 的超时时间，含义就是阻塞等待。通常，如果你的事件循环里不需要在每一轮做额外的工作，比如不需要轮询某些状态，那么让 `wait` 阻塞就是最省 CPU 的做法：只要没有新事件，线程就直接挂起，不会消耗任何算力。
+
+但如果循环里还要兼顾其他逻辑，那就必须对超时时间做一些调整。原因也很简单：不能让 CPU 大部分时间都花在这些额外逻辑上，反而让事件处理变得稀疏。毕竟事件派发才是整个服务器循环里最关键、最有价值的部分，合理的超时设置能帮助程序把主要精力投入在真正的网络事件上，让整体效率更高一些。
+
+![image-20251205145558854](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205145558854.png)
+
+在事件派发的过程中，正如之前讨论过的，内核层面真正存在的其实只有两类事件：可读和可写。至于那些看上去更“恶性”的情况，比如文件描述符被完全关闭、出现错误等等，本质上都可以被归入 IO 问题。所以我们在派发阶段会把这些事件统一转换成可读或可写，再通过 IO 回调内部已经建立好的错误处理逻辑一并接住。
+
+也正因为如此，一个连接在执行完读回调之后，有可能已经被注销、甚至被彻底关闭。既然生命周期在读阶段已经走到了终点，那就不需要再去考虑后续的写事件了，它自然也就没有继续处理的必要。
+
+![image-20251205150741836](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205150741836.png)
+
+当然，此时 epoll 中只有监听套接字这一项，所以 `wait` 如果等到了事件，那必然是监听套接字触发的，也就是它之前注册的 `accept` 回调被唤醒了。需要注意的是，`accept` 也可能因为信号被打断而返回错误，这种情况并不表示真的出错，我们只需要继续循环读取，直到真正的错误出现或监听队列被完全读空。
+
+![image-20251205152434907](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205152434907.png)
+
+而对于普通套接字，处理逻辑的侧重点会有所不同。普通连接和监听套接字的地位并不一样：监听套接字一旦出问题，整个服务就无法正常工作；但普通套接字即便处理失败，也只是一个客户端会话出了状况，不应该影响到其他连接。因此，这里的关键不在于“必须成功处理”，而在于“失败时能够安全回收资源”，避免在混乱状态下留下任何隐形的资源泄露。
+
+对于非阻塞设置来说，如果配置失败，我们理应立即关闭该文件描述符，以避免泄露。不过在当前的实现中，描述符的关闭实际上由 `Connection` 的析构函数自动完成，而这里的 `shared_ptr` 又是局部变量，所以只要非阻塞设置抛出异常，这个局部智能指针随即销毁，文件也会被自动关闭。真正需要注意的是第 206 行和第 203 行的顺序不能颠倒：必须先实例化 `Connection`，再进行非阻塞设置。否则，一旦异常产生，文件描述符可能还没有被托管到 `Connection` 中，自动关闭机制也就无法发挥作用了。
+
+接下来看看注册方法。整体结构非常简单，本质上就是把连接加入到 `epoll` 中，并同时记录到内部的 `map` 里。但细节上有一个顺序必须注意：为了确保在异常发生时资源能够被正确回收，`add` 这个可能抛出异常的操作一定要放在前面，而后再执行 `emplace`。这样做可以避免在 `map` 中留下半初始化、无法清理的残留项，从而保持连接管理的整体一致性。
+
+![image-20251205152922492](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205152922492.png)
+
+至于注销、完全关闭、对端关闭以及错误，这几种情况最终都会走到同一套处理逻辑。虽然从语义上说，关闭和错误最终都意味着“读不了了”，自然应该进入注销流程——毕竟一个无法继续通信的连接没有保留价值——但在实现上，我没有让关闭或错误去简单复用注销函数。原因在于，注销逻辑内部包含一段用于校验 `shared_ptr` 引用计数的检查机制，用来确认引用计数是否符合预期。这个检查对于保证资源不会泄露至关重要。如果关闭和错误直接复用注销方法，就可能绕过必要的语义前置条件，导致引用计数不匹配，从而让资源管理变得不够严谨。
+
+![image-20251205154053019](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205154053019.png)
+
+![](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205154324774.png)
+
+至于读写回调，其实并没有太多复杂的地方，只需要注意几个细节。
+
+![image-20251205154927894](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205154927894.png)
+
+首先，请求内容并不一定是纯文本，因此不能使用 `string::operator+=(const char*)`。这种方式依赖 `\0` 作为终止符，而二进制流里可能包含大量 `\0`，这会导致请求内容被意外截断。为了避免这一点，我们采用 `append(const char*, size_t)`，直接从缓冲区的首字节开始，按照指定的字节数追加到 `string` 中，这样就完全绕开了 `\0` 的影响。
+
+当读到零字节时，意味着对端已经发起了四次挥手。此时我们这边的连接仍然没有关闭，因此处于对端 `RDHUP` 的状态。如果写得简单一点，这里可以立刻注销；但根据我们对 TCP 行为的理解，这个状态只是对端关闭了写端，读端并未关闭，因此我们还有机会把应用层发送缓冲区里可能残留的应答数据发给对方。虽然这对我们来说可能无所谓，但既然数据已经生成，不妨发送出去。不过最后的注销是必须要做的，原因有两点：其一，`RDHUP` 不是默认关注的事件，如果我们不显式关心，就永远不会等到它；其二，`RDHUP` 本质上属于可读事件，但它只会触发一次。如果没关注它，就不会等到它；即使关注了，错过这一发信号，也再也不会收到通知，而对端因为已经关闭写端，也不会再触发普通的可读事件。这样一来就会造成连接的暂时“挂起”，形成一种短暂的资源泄露。之所以说是“暂时”，是因为如果对端长时间收不到我们这边的应答，它最终会直接异常断开，引发错误事件，从而让我们重新获得清理资源的机会。
+
+如果读到的请求一切正常，那就把收到的报文交给上层逻辑解析，生成应答报文，并把应答写入发送缓冲区。当发送缓冲区里出现数据，就意味着完整的应答报文已经准备好了，这时我们需要开始关注可写事件。等到 epoll 通知可写后，再通过写回调把发送缓冲区的数据发送出去。
+
+对于写回调，需要特别强调一点：它的触发时机不仅包括等待到可写事件后由 epoll 调用，还包括在读回调中检测到对端关闭时，为了 flush 发送缓冲区而进行的“顺手调用”。也就是说，写回调有可能在**并未关心写事件**的情况下被执行。
+
+因此你会看到两处防御式判断：
+
+- `while` 的循环条件必须确保发送缓冲区确实有数据可写，否则写回调可能会在“非写事件触发”的情况下被调用，从而进入无意义循环。
+- 取消 EPOLLOUT 时，必须确认之前确实设置过写事件，否则可能在“未注册写事件”的前提下调用取消，导致 epoll_ctl 状态错乱。
+
+下面这段图中，如果最终触发了错误回调，`shared_ptr` 的引用计数会短暂升至 4。这里 `connect_common` 的“疑似泄漏”属于误报：这是回调链路嵌套调用 `shared_from_this()` 导致的瞬时引用数上升，而不是未释放的真正泄漏。
+
+![image-20251205161424761](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205161424761.png)
+
+接下来就是会话层之上的表示层了。我们在这一层的整体思路，是用一个自定义的二进制协议作为框架，具体的对象结构和字段内容则交给 `protobuf` 处理。可能有人对 `protobuf` 不太熟，它是谷歌生态中的专职序列化与反序列化工具，工作模式属于“代码生成代码”：我们在项目最开始写好的 `calculator.proto`，会通过 `protoc` 自动生成对应的 C++ 源文件。在 `CMakeLists.txt` 中，我已经将它们指定生成到了 `gen/proto` 目录下：
+
+```shell
+[wind@Ubuntu build]$ ls gen/proto/
+calculator.pb.cc  calculator.pb.h
+[wind@Ubuntu build]$ 
+```
+
+这些生成代码里包含了大量在不同场景下使用的序列化与反序列化方法，不过对于我们当前的项目，真正需要掌握的只有两个成员函数：
+
+```cpp
+// 反序列化：把二进制字符串解析到对象各字段
+bool xxx::ParseFromString(absl::string_view)
+
+// 序列化：把对象的字段序列化为二进制流
+bool xxx::SerializeToString(std::string*)
+```
+
+`absl` 是谷歌基础设施库（Abseil）的命名空间，而其中的 `string_view` 本质上就是一种非常轻量的字符串索引，和 C 语言里的 `const char*` 在定位上相似，但更安全也更易用。`const char*` 依赖 `\0` 作为终止符，而二进制流里往往可能包含大量 `\0`，因此读取时很容易提前截断。`string_view` 则同时保存了起始地址和长度，完全摆脱终止符的限制，能无损处理任意二进制内容。更重要的是，`string_view` 可以由 `std::string` 直接构造，所以在使用 `ParseFromString` 时，你也可以把它当成接受一个 `std::string` 来理解。它们的返回值表示是否成功.
+
+我们的二进制协议由五个部分组成，前四个是固定表头，最后一个是 `protobuf` 的序列化内容。在 `codec.hpp` 中，我提供了 `pack` 和 `unpack` 两个接口，用来把负载封装成完整报文，或者从报文中还原出负载。表头的结构依次是：魔数（2 字节，用来快速判断报文类型是否属于我们定义的协议），协议版本（1 字节），协议类型（1 字节，用来区分请求、响应或错误），以及负载长度（4 字节，采用网络字节序）。
+
+![image-20251205202734801](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205202734801.png)
+
+之前我们似乎说过，应用层协议都不用二进制的，但这其实并不准确。例如一些成熟的协议，内部就是二进制格式。二进制相对文本协议的优点是更高效，缺点则是不可读。再加上如今计算机性能越来越充裕，效率不一定总是最关键的，可读性反而更受重视。所以前面我们一直用文本协议，读起来直观，看效果也更清晰。而在这里，我们换换口味，用一个完整的二进制协议来封装请求与应答。
+
+`pack` 的逻辑比较直接：根据负载内容计算长度，将各字段按协议顺序追加到缓冲区中。为避免字节序歧义，所有多字节字段都统一转换为网络字节序。
+
+![image-20251205203155475](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205203155475.png)
+
+`unpack` 的思路是：在确认缓冲区至少包含完整的协议头后，再依次解析各字段；若负载长度不足，则返回 `false` 继续等待更多数据。待所有字段解析成功后，将已解析的整帧从缓冲区中移除，以处理粘包情况。
+
+![image-20251205203627525](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205203627525.png)
+
+![image-20251205203903258](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205203903258.png)
+
+接下来进入表示层与应用层的处理流程。`SessionHandler.hpp` 作为 `tcp_server` 的回调入口，使用 `codec` 对收到的数据报文进行解包和反序列化，解析出业务参数，执行对应的服务方法，并将结果重新封装为应答报文返回给 `tcp_server`。
+
+![image-20251205205210443](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205205210443.png)
+
+如果 `unpack` 成功，就基于生成的 `.pb` 文件创建一个 `calc::CalcRequest` 对象；如果反序列化失败，则直接返回一条表示错误的负载。
+
+![image-20251205210016371](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205210016371.png)
+
+需要注意的是，在 `pb` 文件中，枚举的实际名称会自动带上“枚举类型名 + 所属消息类型名”作为前缀，这是 `protobuf` 的命名规则。
+
+![image-20251205205605750](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205205605750.png)
+
+`package` 后的标识符会在生成的 `.pb` 文件中转换为对应的命名空间。而 `CalcRequest` 包含三个字段：左操作数、操作符、右操作数，它们都可以通过同名的访问方法直接读取。
+
+此处先以操作符作为 `key` 查找对应的服务函数。
+
+![image-20251205210222055](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205210222055.png)
+
+若查找失败，则返回一份 `result` 为默认值的应答负载，并写明错误码与错误原因。操作符不存在属于**应用层错误**，因此仍然返回**应答类型**的报文；而前面提到的反序列化失败属于**表示层错误**，则需要返回**错误类型**的报文。
+
+![image-20251205210815350](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205210815350.png)
+
+`serialize_or_error` 的职责是根据参数构造一个应答对象，并尝试将其序列化。若序列化成功，就直接返回结果；若序列化失败，则视为表示层错误，因此返回一份错误类型的负载。
+
+![image-20251205211007979](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205211007979.png)
+
+![image-20251205211034730](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205211034730.png)
+
+接下来，从请求负载中取出两个操作数并调用对应的计算方法。计算过程中如果抛出异常，就按异常中携带的错误码和错误信息填充应答。
+
+![image-20251205211623906](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205211623906.png)
+
+![image-20251205211735038](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205211735038.png)
+
+数值溢出的情况会直接抛异常；除零被特殊处理，结果返回正或负无穷取值。
+
+最终进入 `serialize_or_error`：如果序列化成功，就返回正常的应答；若序列化失败，则走到 `error` 分支，构造并序列化一份错误类型的报文。
+
+![image-20251205211920971](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205211920971.png)
+
+最后, 是`server`的`main`函数
+
+![image-20251205213416779](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205213416779.png)
+
+对于客户端的会话层来说, 由于不用处理多个连接, 所以写起来更加简单
+
+![image-20251205213823454](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205213823454.png)
+
+此处的`_SessionAdapter`是一个基类的指针, 该基类含有虚接口`send(), recv(string)`, 负责为`tcp_client`提供请求报文和对收到的应答报文进行解析.
+
+![image-20251205213901520](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205213901520.png)
+
+`run`采用的是短连接模式, 一次`read, recv`, 尽管严谨地来说, `recv`可能会收到不完整的报文, 但我们这里就不写这么严谨了
+
+![image-20251205214702860](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205214702860.png)
+
+![image-20251205214740490](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205214740490.png)
+
+`CalculatorApp.hpp`处于应用层, 其职责是依据二进制自定义协议的类型, 提供对应的应用类
+
+![image-20251205215755742](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205215755742.png)
+
+正如注释所标注的那样, 末尾的数字表示处理的协议版本
+
+`base`负责提供统一的虚接口, 其中的`send`, 是依据`CalculatorApp`实例化时的参数, 调用`pb`文件中的方法, 进行序列化, 生成自定义协议的负载, 而`recv`, 则是解析服务端应答报文中的负载
+
+![image-20251205220310819](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205220310819.png)
+
+`invalib_call`用在不得不有函数实现但实际上不会被调用的子类重写函数中.
+
+`CalculatorRequestApp1`负责生成一份请求报文的负载, 它的`recv`是空的
+
+![image-20251205220705566](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205220705566.png)
+
+`CalculatorPesponseApp1`负责解析服务端发过来的应答类型的负载
+
+![image-20251205220904563](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205220904563.png)
+
+`CalculatorErrorApp1`自然是解析服务端发过来的错误类型的报文负载
+
+![image-20251205221106573](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205221106573.png)
+
+`SessionAdapter.hpp`负责为`tcp_client`提供回调方法
+
+![image-20251205215014096](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205215014096.png)
+
+而在`class SessionAdapter`内部, 依据自定义协议的类型, 把应用层上对应的应用处理对象, 存储到对应的哈希表中
+
+![image-20251205221741960](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205221741960.png)
+
+这里使用的是C++17的折叠表达式语法, 可以把可变参数展开, 逐个进行方法调用. 从而将接收应用和发送应用分别注册到对应的哈希表中.
+
+并且, 由于可能存在多个负责发送的应用, 因此, 在使用前, 我们还需要手动`select`一下`send_app`的标识码.
+
+![image-20251205222350511](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205222350511.png)
+
+最后看一下`client/main.cpp`
+
+![image-20251205224028744](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/image-20251205224028744.png)
+
+下面的`Reactor`是之前我写的版本, 正是因为我对这个旧版不满意, 所以几乎重制了整个`Reactor`, 如果你觉得新版本的门槛很高, 不易理解, 你也可以看旧版, 它更加基础, 门槛更低, 但缺点可能是逻辑有一点混乱, 并且我没有完全重读它, 可能存在一些不对的地方.
+
+### Reactor(旧版)
 
 我们先把项目框架搭一下, 该拷贝的拷贝, 该新建的新建.  我们使用`cmake`来构建项目
 
@@ -14111,8 +14316,6 @@ void Excepter(std::weak_ptr<Connection> connection) {
 我们可以设定一个超时时间, 应用层的超时时间, 以时间戳的形式记录每个连接的超时连接, 每次连接有就绪事件你就更新一下超时时间戳, 以小根堆的形式将它们进行管理, 还记得之前的那个空闲任务接口吗? `RunIdleTasks()`, 我们可以在其中增加连接管理功能, 在每次事件派发的间隙, 把堆顶元素拿出来看看, 看看堆顶对应的连接有没有超时,  超时就把它`pop`掉, 各种意义上的, 一是直接把它从小根堆里拿出, 二是把连接注销掉, 然后再看看新堆顶, 看看有没有超时, 重复这些逻辑.
 
 我们也可以把上述和时间相关的内容独立出来形成一个新的组件, 每次间隙让服务器把这个组件包含一下, 间隙调用方法检查一下, 定时组件自己也调用服务器给的回调去处理那些超时的连接.
-
-
 
 以下是理论部分.
 
