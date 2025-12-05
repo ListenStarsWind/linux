@@ -199,11 +199,12 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
             int fd = tcp_protocol::accept(listen_socket, user_sockaddr);
             if (fd >= 0) {
                 try {
-                    // 若它抛出异常, 会话层不需要进行任何移除行为
-                    tcp_server::SetNonBlock(fd);
                     // 若 new 抛出异常, 就不用考虑了, 那时候应该在意系统
                     auto socket = connection::create(fd, tcp_protocol::inet_ntop(user_sockaddr),
                                                      user_sockaddr.sin_port, server, "普通套接字");
+                    // 若它抛出异常, 会话层不需要进行任何移除行为
+                    tcp_server::SetNonBlock(fd);
+
                     socket->set_register_call(
                         std::bind(tcp_server::connect_register, std::placeholders::_1,
                                   EpollerItem::inreadable | EpollerItem::edge_trigger));
@@ -213,7 +214,6 @@ class tcp_server : public std::enable_shared_from_this<tcp_server>, public tcp_p
                     socket->set_rdh_call(tcp_server::connect_rdhangup);
                     socket->set_hup_call(tcp_server::connect_hangup);
                     socket->set_err_call(tcp_server::connect_error);
-
                     socket->set_in_call(tcp_server::recv_connect);
                     socket->set_out_call(tcp_server::send_connect);
 
