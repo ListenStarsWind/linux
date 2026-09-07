@@ -20,11 +20,11 @@
 
 首先我们知道传参实例化是从右往左的，比如`func(a,b,c)`它是先把`c`传进去的，再把`b`传进去，最后再把`a`传进去，它是使用压栈的方式存储形参的。
 
-![image-20241210172856887](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210172856929.png)
+![image-20241210172856887](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210172856929.png)
 
 对于可变参数函数来说，就有了一个问题，怎么找到所有的参数，为此，C语言提供了一系列的宏
 
-![image-20241210172156683](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210172156763.png)
+![image-20241210172156683](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210172156763.png)
 
 首先我们看`va_list`，它是某个抽象的类型，可能是指针，也可能是某种结构体，这取决于具体的编译环境，不管它是什么，都描述了可变参数的状态，并索引着某个参数；通过`va_list`变量，再结合其它宏操作就可以解析出一个个参数。`va_start`是一个宏，该宏的第一个参数就是`va_list`类型，第二个就是最后一个被实例化的元素，该宏会通过一系列手段，对`va_list`对象进行初始化，以使其存储当前函数栈帧的可变参数状态，从而使得`va_list`变得有效，在经历过`va_start`后，`va_list`实际上就索引第二个形参，也就是倒数第二个被实例化的参数，对于上图来说，实际上就是`b`；`va_arg`宏会解析出`va_list`对象当前索引的参数，并将`va_list`的索引指向下一个参数。如果从C++的角度来说，用户自已定义`va_list`对象和使用`va_start`的行为类似于构造函数，`va_arg`则相当于迭代器，依据参数实例化的先后顺序提供了遍历可变参数的方式，至于`va_end`，则负责让`va_list`对象失效，从功能上来看，类似析构。
 
@@ -111,15 +111,15 @@ int main()
 
 Linux中有多种获取时间的接口，比如系统接口`gettimeofday`
 
-![image-20241210215535450](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210215535576.png)
+![image-20241210215535450](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210215535576.png)
 
 通过输出型参数`struct timeval *tv`便可以获知时间戳——从 1970年1月1日00:00:00 UTC 到当前时间所经过的 秒数，如果不足一秒，则以微秒方式展现，不过这种时间显然不是给人看的，我们要找个用人类语言描述的时间，此时我们就需要使用`localtime`
 
-![image-20241210220350976](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210220351063.png)
+![image-20241210220350976](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210220351063.png)
 
 `localtime`可以将一个时间戳转化为`tm`结构体的接口，`tm`中包含年月日分秒等各类时间信息，它的时间戳参数可由`time`接口链式传参
 
-![image-20241211080927185](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241211080927302.png)
+![image-20241211080927185](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241211080927302.png)
 
 ```cpp
 // 示例：时间的获取
@@ -144,7 +144,7 @@ void example()
 
 格式控制是个繁琐但关键的操作，为此C语言有专门的格式控制接口，即下图中的`vsnprintf`接口
 
-![image-20241210214911928](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210214912027.png)
+![image-20241210214911928](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210214912027.png)
 
 ```cpp
 #pragma once
@@ -443,6 +443,6 @@ namespace wind
 
 让我们看看效果
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241211163123922.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241211163123922.mp4"></video>
 
 # end

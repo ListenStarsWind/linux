@@ -148,7 +148,7 @@ This is a process. pid:27604
 
 信号对应的默认行为其实就是一种函数，绝大多数信号对应的行为函数可由系统接口`signal`进行重写，C++的虚函数重写说不定就是从这借鉴过去的，它们的重写原理相似，都是使用了一个中间层，具体细节在此就不多说了。
 
-![image-20241220193322733](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241220193322838.png)
+![image-20241220193322733](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241220193322838.png)
 
 ```cpp
 #include <signal.h>
@@ -496,7 +496,7 @@ Killed
 
    比如，有个系统接口叫做`kill`
 
-   ![image-20241221094235017](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241221094235153.png)
+   ![image-20241221094235017](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241221094235153.png)
 
    下面我们使用命令行参数，实现一个命令行`kill`程序。就叫`slay`(终结)吧。
 
@@ -552,7 +552,7 @@ Killed
 
    有个语言接口叫`raise`
 
-   ![image-20241221101805600](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241221101805717.png)
+   ![image-20241221101805600](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241221101805717.png)
 
    它的功能是给自己发信号，实际上就是`kill(getpid(), sig);`
 
@@ -600,7 +600,7 @@ Killed
 
    语言接口`abort`有些特殊，它是对自己发送`6`号信号`SIGABRT `，`SIGABRT `也是退出信号，不过是用于异常情况的退出，类似与关键步骤函数调用失败是使用的`_exit(int)`，无论`SIGABRT`的行为函数是否被重写，它都保证进程能退出，可以认为它内部又对`SIGABRT`的行为函数进行了重写，重写成了默认行为的样子，然后又对自己发送`SIGABRT`信号。
 
-   ![image-20241221104108430](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241221104108545.png)
+   ![image-20241221104108430](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241221104108545.png)
 
    ```cpp
    #include <sys/types.h>
@@ -897,7 +897,7 @@ Killed
    
       系统接口`alarm`可以为当前进程设定一个闹钟, 当闹钟响时, 系统就会给进程发送`14`号信号`SIGALRM`, `SIGALRM`的默认行为是`Term`
    
-      ![image-20250105135610644](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250105135610878.png)
+      ![image-20250105135610644](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250105135610878.png)
    
       `alarm`的返回值表示上次闹钟剩下的时间. 比如, 六秒钟前设定了一个闹钟, 那在三秒后又设定闹钟, 返回值就是3,  如果上次没设闹钟, 或者上次设的闹钟已经响了, 那么返回值就是0.
    
@@ -1090,7 +1090,7 @@ Killed
    
    在学习进程结束状态的时候, 我们特意回避了一个名为`core dump `的标志位.
    
-   ![image-20250105154848770](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250105154848928.png)
+   ![image-20250105154848770](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250105154848928.png)
    
    `core dump`标志位就是记录进程终止时是否生成核心转储文件的, 如果生成 就是1, 没生成就是0.
    
@@ -1358,7 +1358,7 @@ Killed
 
 这些概念都需要有对应的软件结构作支撑, 对于普通信号来说, 有三张非常重要的表, 其中两个是位图表, 剩下那个是方法表.
 
-![image-20250111133409093](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250111133409186.png)
+![image-20250111133409093](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250111133409186.png)
 
 我们先看所谓的方法表, 方法表其实就是函数指针数组, 它们指向着对应信号的执行逻辑. 比如就上图来说, `SIG_DFL`是个宏, 这个宏实际上是函数指针, 或者说, 函数名, 系统有自己的类似于我们上面进行信号捕捉时的`handler`, 它内部也是以分支结构的形式写出了一个个信号的默认行为,    对于`SIG_IGN`来说, 它表示信号忽略的意思, 可以说就是指向了一个空函数, 这个函数空有接口, 但里面没代码, (实际不是真的空, 忽略或者说空是从信号行为本身的角度来说的, 但实际上这个函数里面还包括信号控制的相应代码, 信号默认都是要处理的, 其中包括一系列的内核层操作, 后面我们会细说, 忽略连这些内核层操作都不执行了, 默认是执行, 它凭什么不执行, 因为里面代码特别写了就是不要执行这些默认的内核操作, 所以不会执行, 但仅从用户层来说, 可以简单认为是空的)  所以就有忽略的意思, 信号发生时什么都不做, 除此之外, 用户还可以通过`signal`接口对信号的默认行为进行覆写, 其实就是把对应信号的方法换成用户自己写的, 这样就达到了行为覆写的这个效果.     另外, 需要说的是, 
 
@@ -1525,7 +1525,7 @@ int main(int argc, char* argv[])
 
 在说信号的检测与处理之前，我们需要对系统有更深入的了解。为此，我们需要先再谈谈进程地址空间。
 
-![image-20241214160114166](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214160114236.png)
+![image-20241214160114166](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214160114236.png)
 
 ---
 
@@ -1562,11 +1562,11 @@ CPU的运行状态由内部寄存器控制，比如名为“`ECS`”的段寄存
 
 信号的检测与处理, 就发生在CPU由内核态切换到用户态之前,    此时CPU上运行的是系统, 系统会看即将运行进程信号的两个位图表, 如果有信号需要被处理, 那就依据具体信号先对`pending`进行修改, 然后去方法表中执行信号对应的行为, 如果对应的方法是`SIG_DFL`, 因为`SIG_DFL`就是系统自带的, 所以就直接以"内核态"的方式去执行, 如果对应的方法是用户自己写的, 就先变为"用户态", 以"用户态"的身份去执行其中的代码, 执行完后, 再返回"内核态", 因为"内核态"是系统, 进程的程序计数器记录了进程下一条指令的位置, 而程序计数器是系统的数据, 所以需要先返回"内核态", 这样才知道到底应该返回到进程的什么位置, 才能变为"用户态".  在压栈过程中, 用户自己写的信号处理方法会被自动拼接上返回内核态的代码, 所以它就返回内核态了.
 
-![image-20250112121402753](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250112121403043.png)
+![image-20250112121402753](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250112121403043.png)
 
 我们可以用下面这张图来记忆:
 
-![image-20250112125855745](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250112125855809.png)
+![image-20250112125855745](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250112125855809.png)
 
 图中贯穿无穷符号的横线被视为用户态和内核态的分界, 当内核态变为用户态之前, 就会进行信号检测.
 
@@ -1719,7 +1719,7 @@ void handler(int event)
 
 我们之前不怎么谈原子性这个概念, 是因为我们之前的都是单控制流, 但信号捕捉这里, 进程的主控制流和信号控制流是相互独立的, 于是就会牵扯到很多并发问题.  比如, 我们就拿链表节点的插入为例.
 
-![image-20250123174417147](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250123174417357.png)
+![image-20250123174417147](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250123174417357.png)
 
 首先我们生成了一个节点, 记为`node1`, 之后, `node1`的指针指向了原先的第一个结点, 此时, 由于进程捕捉到了一个信号, 这个信号也是在该链表中头插一个节点, 于是, 就生成了`node2`, `node2`指向原先的第一个节点, 接着, `node2`变为了第一个节点, 之后回退到之前的控制流上, `node1`就变成了第一个节点, 这就造成了`node2`的丢失, 引发了内存泄漏问题.
 
@@ -2071,7 +2071,7 @@ after
 
 为了避免出现类似的情况, 编译器对优化等级进行了划分, 常见的是`-O0  -O1 -O2 -O3`,
 
-![image-20250125192436353](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250125192436531.png)
+![image-20250125192436353](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250125192436531.png)
 
  g++ 默认`-O0`, 即不优化, 随着`-O`后面的数字越来越大, 优化程度就越高, 比如, 既然`flag`都不修改, 只要第一次为真那不就恒为真, 下次都不用逻辑判断, 一直循环就行.
 

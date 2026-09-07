@@ -45,7 +45,7 @@ makefile  PracessState
 
 上节课中我们主要用的是`ps`指令，这回我们先用`top`指令看一看：
 
-![image-20241018194906613](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410181949906.png)
+![image-20241018194906613](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410181949906.png)
 
 我们看到第一个就是，正在全速运行，占了CPU`99.7%`的利用率。不过这样不太方便观察，所以我们还是用回`ps`命令。
 

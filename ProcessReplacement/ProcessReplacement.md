@@ -4,9 +4,9 @@
 
 在Linux中，有七个接口用于进程替换，其中六个在3号手册，还有一个在1号手册。我们先不管那么多，先直接写一个单进程版本的进程替换，直观地感受一下进程替换的效果，接口的具体说明将在`interface`中详细说明。
 
-![image-20241104175407495](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411041754728.png)
+![image-20241104175407495](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411041754728.png)
 
-![image-20241104203742209](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411042037338.png)
+![image-20241104203742209](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411042037338.png)
 
 execute a file，其中的file必须是可以直接或者间接执行的文件，并且用户有对应的执行程序。
 
@@ -150,7 +150,7 @@ replacement after: pid->30342
 
 现在我们回到这张图，来说说`exec`系列接口
 
-![image-20241104175407495](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411041754728.png)
+![image-20241104175407495](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411041754728.png)
 
 `execl` 中的 `l` 代表 `list`，后面的参数就像一个个节点，分散在内存的不同位置。第一个参数 `path` 是一个文件路径，指示要执行的文件的位置。这一过程类似于 `bash` 执行 `ls` 命令时，首先会在环境变量 `PATH` 中的各个路径下寻找 `ls`，只有找到后，才能将其加载到物理内存中。实际上，`/usr/bin/` 就是 `PATH` 中的一个路径。
 
@@ -843,7 +843,7 @@ replacement after: pid->30771
 
 我们也可以使用`putenv`在父进程里面导入一个环境变量
 
-![image-20241105145104442](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411051451735.png)
+![image-20241105145104442](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411051451735.png)
 
 ```cpp
 #include<iostream>
@@ -1115,7 +1115,7 @@ replacement after: pid->2097
 
 上述六个接口都位于3号手册，也就是说，它们都是C语言的接口，很明显，语言的背后隐藏着系统，这六个接口实际上都是对系统接口`execve`的不同封装罢了。
 
-![image-20241107181226146](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411071812287.png)
+![image-20241107181226146](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411071812287.png)
 
 ## myshell
 
@@ -1476,14 +1476,14 @@ else
 
 最后提一下，为了区分我们的自定义 shell 和系统 shell，我们没有在命令行参数中添加 `--color` 选项，因此输出内容不会有颜色区分。
 
-![image-20241108211418187](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411082114270.png)
+![image-20241108211418187](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411082114270.png)
 
 -------------------------
 
 最后，我们可以谈谈代码之外的一些内容。系统 shell 的环境变量是从用户家目录中的配置文件加载的。当用户登录服务器时，shell 会自动启动并加载这些配置文件，随后在用户退出前持续运行。我们可以在 home 目录下的 `.bash_profile`、`.bashrc` 
 
-![image-20241108212139218](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411082121297.png)![image-20241108212312220](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411082123311.png)
+![image-20241108212139218](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411082121297.png)![image-20241108212312220](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411082123311.png)
 
-以及全局配置文件 `/etc/bashrc` 中查看这些配置信息，不建议修改文件，修改前也要作备份。![image-20241108212444240](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411082124332.png)
+以及全局配置文件 `/etc/bashrc` 中查看这些配置信息，不建议修改文件，修改前也要作备份。![image-20241108212444240](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411082124332.png)
 
 # end

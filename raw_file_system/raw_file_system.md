@@ -12,29 +12,29 @@
 
 考虑到大家手上的笔记本电脑主要用的都是固态，所以没怎么见过硬盘，所以我们先来看看硬盘的外貌。
 
- ![797c78c66a774b668c034174f83b5de3](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201415089.jpeg)
+ ![797c78c66a774b668c034174f83b5de3](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201415089.jpeg)
 
-![hdd1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201416269.jpg)
+![hdd1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201416269.jpg)
 
-![641](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201442601.png)
+![641](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201442601.png)
 
 硬盘，有时被称为“永久存储介质”，这里的永久是相对的，它的意思就是说，这种存储介质断电不会丢失数据。硬盘在主体结构上是机械的，原本外设的存储效率就低，但再怎么低，其内部的主体结构还是各种电路，信息都是通过电信号传递的，但硬盘不一样，即使硬盘的机械运动再快，也比不过光电信号，所以硬盘经常出现效率问题，但不要担心，我们稍后在抽象硬盘章节中会说如何从软件层面提高硬盘效率的。现在我们先不管这些。
 
 在第二张照片里，我们可以看到硬盘里面有若干类似光盘的结构。这就是硬盘中存储数据的核心载体，我们称之为“盘片”。“盘片”和光盘有些不同，光盘只有一张光面，盘片的两面都是光面。数据就是存储在这些光面上的。
 
-![4722a0b864df44f7a8d84d008852507d](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201446684.jpg)
+![4722a0b864df44f7a8d84d008852507d](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201446684.jpg)
 
 硬盘是磁性存储介质，所以“盘片”也称为“磁盘”。“磁头”负责对磁盘上的数据进行读写，当硬盘断电后，摇头臂的马达就会失效，弹性组件就会把磁头移动到磁头存放区，也就是图中的橙色部分。当硬盘上电后，主轴上的马达就会带动磁盘进行高速转动，这会使得磁盘周围的空气快速流动，从而使得磁头悬浮于磁盘之上，不与磁盘物理接触。磁头会不断左右摆动，以便于对数据进行定位和访问。除此之外我们还可以看到，磁盘是有多个的，每个磁盘的每一面都有一个对应的磁头。磁头和磁盘的距离非常近，这是为了更敏感地识别磁盘上的磁性信息。不过如此近的距离会使得硬盘对空气的要求很高，所以硬盘需要在无尘环境下进行组装，而硬盘在普通环境下拆开，这个硬盘就不能再使用了。使用的话，空气中的小灰尘就会磨花磁盘，于是数据就会在物理层面上被破坏了。所以真拆开了，要去硬盘厂商那里把数据转移出来。
 
 那数据究竟存在磁盘的哪里呢？磁盘的两面看似光滑，实际上每个光面上都有许多同心圆，我们称之为“磁道”，磁道又可以划分成许多“扇区”，扇区就是数据存储的基本元单位。也就是说，硬盘只能一个一个地读取扇区。就像内存一个一个读字节那样。
 
-![2-1Q01215492WL](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201527534.jpg)
+![2-1Q01215492WL](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201527534.jpg)
 
 磁道是一圈一圈的，扇区是一个一个的。扇区是磁道的基本组成结构。扇区对数据的存储容量是一定的，一般来说，是512字节。从圆心那里画几条辐射线，两条辐射线之间的磁道部分就可以视为一个扇区。不过这实际不够严谨，磁道的半径不同，在图中看，扇区物理大小自然不同，实际上不是这样的，扇区大小都是一样的，半径短的磁道扇区少一些，半径长的磁道扇区多一些。不过为了方便对下面的描述进行简化，我们姑且这样认为。
 
 除此之外还有“柱面”的概念，这个现在了解一下即可，在本篇文章的后面用不到。它是硬盘结构中的一个概念，用于描述数据在硬盘上的物理位置。它是由硬盘中相同半径位置上的所有磁盘盘片上的磁道组成的一个集合。可以简单理解为，当硬盘的磁头组在相同位置（垂直对齐）时，跨越所有盘片上的磁道集合就是一个柱面。磁头的左右移动就是在寻找目标柱面，找到之后，磁头就不会再摆动了，它就选中了这个柱面。这里之所以说现在只需要了解，是因为本篇文章讲的机理，不是实操，实操过程中，肯定要有意识地把数据存在同一个柱面上，这样就可以在不移动磁头的情况下访问该柱面上的所有磁道数据，提高数据访问效率。
 
-![6e8e981f7c78fa57679576abcf2ebecc](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201614099.png)
+![6e8e981f7c78fa57679576abcf2ebecc](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201614099.png)
 
 那这512字节到底是怎么存储的呢？其实很简单，相信我们小时候肯定是见过吸铁石的，吸铁石都有南北两级，扇区里也有很多小吸铁石，我们规定，如果小吸铁石上面是北极，下面是南极，那么它就表示`1`，如果小吸铁石上面是南极，下面是北极，那么它就表示`0`。通过某些机制，很明显是某种物理机制，或者材料机制，具体我不知道，可以改变扇区中小吸铁石的磁性，从而改变它们的`0 1`状态。既然能表示`0 1`，那就好说了，这就是一个比特位，一字节是八比特位，那4096个小吸铁石不就能存储512字节吗。
 
@@ -50,23 +50,23 @@
 
 那操作系统主要用什么寻址方式呢？别急，在说这个之前我们先看看磁带。
 
-![67EwfIGr2bjO9nZGPdx3Tg](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201700202.jpg)
+![67EwfIGr2bjO9nZGPdx3Tg](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201700202.jpg)
 
-![image-20241120170816115](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201708190.png)
+![image-20241120170816115](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201708190.png)
 
 磁带也是一种存储介质，它里面也是一圈一圈的，如果把它里面的带子扯出来放好，就会发现它是一个很长的长条。同样的，各个盘面上的磁道我们也可以抽象的把它展开，这样也能形成一个很长的长条。
 
-![image-20241120172248155](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201722193.png)
+![image-20241120172248155](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201722193.png)
 
 这样就能把硬盘抽象成线性的存储结构。
 
 每个面都可以划分出若干磁道
 
-![image-20241120172722466](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201727492.png)
+![image-20241120172722466](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201727492.png)
 
 每个磁道又可以划分出若干扇区
 
-![image-20241120172900025](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201729064.png)
+![image-20241120172900025](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201729064.png)
 
 这样的话，我们其实就可以把硬盘抽象成以扇区大小为单位元素的数组。既然是数组，那就有下标。
 
@@ -94,7 +94,7 @@ ext2是一个具体的原始文件系统，专门用于Linux系统文件管理�
 
 比如，依据下面这张图，我们把一个硬盘划分出了`n+2`个区域。或者说`n+2`个挂载点。
 
-![image-20241120194848049](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201948217.png)
+![image-20241120194848049](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201948217.png)
 
 为了方便起见，可以把这些分区统称为“块”。第一个块比较特殊，它的大小固定，其内部存储的是一个程序，该程序的职责是在电脑开机时，从硬盘的其它部位找到操作系统内核程序，然后引导内核加载到内存中，随后它会把指挥权移交给系统内核，自己则从内存中退出。也就是管开机的，它里面的数据若遭到破坏，就会开不开机。不过我们的服务器倒也很少开关机，所以了解即可。
 
@@ -348,7 +348,7 @@ total 8
 
 软链接与原文件的地位不相同，当原文件被删除后，软链接就会因为找不到文件路径而报错，相当于Windows快捷方式
 
-![image-20241122213554541](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411222135710.png)
+![image-20241122213554541](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411222135710.png)
 
 `unlink`可以用来删除链接文件
 
@@ -439,7 +439,7 @@ Linux将物理内存划分成大小相同的块，由于内存主要与硬盘进
 
 让我们看看Linux原码中的`struct page`
 
-![image-20241124204826537](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411242048715.png)
+![image-20241124204826537](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411242048715.png)
 
 ```c
 /*
@@ -527,9 +527,9 @@ struct page {
 
 除此之外还有`struct list_head lru;`，这个结构体实际上是一个节点，链表或者队列或者其他数据结构的节点，如果这个页表需要被刷新，`lru`的指针就会在刷新队列里排队，就像进程控制块那种排队方式。
 
-![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191417075.png)
+![绘图1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191417075.png)
 
-![image-20241124211209016](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411242112214.png)
+![image-20241124211209016](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411242112214.png)
 
 除此之外，系统对于需要多个页框才能容纳的大块数据，会采用一种名为伙伴系统算法的方式进行管理。伙伴系统算法是一套方法，主要涵盖内存分配、内存释放和伙伴块寻找等功能。系统会将大块数据分成可被页框独立存储的一个个小块，随后系统将这些小块逐一存储到空闲页框中，并通过某种方法确定逻辑上（即在大块数据中）相邻的块之间的伙伴关系。当一个小块被释放时（从应用层来看，即其起始地址被 `free`），系统会将该小块的 `page` 对象相关标志位置为“空闲，可被覆写”状态，然后通过小块与小块之间的伙伴关系找到下一个小块，并将其也置为“空闲”状态，直到找不到下一个小块为止。通过小块之间的伙伴关系，系统无需直接维护所有小块的关系，仅需维护逻辑相邻块之间的伙伴关系，就能在逻辑上将所有小块组织成线性结构。
 
@@ -541,25 +541,25 @@ struct page {
 
 当用户打开一个文件时，系统会根据提供的文件路径找到该文件对应的 `inode` 编号，然后通过已加载的文件系统信息找到对应的 `inode` 对象。接着，系统会将 `inode` 中的大部分信息以 `struct inode` 的形式加载到内存中，并将指向 `struct inode` 的指针填充到相应的 `struct file` 结构中。因此，`struct file` 只存储少量的文件管理属性，而大多数文件属性则由 `struct inode` 存储。
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251011533.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251011533.mp4"></video>
 
-![image-20241125101605083](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251016430.png)
+![image-20241125101605083](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251016430.png)
 
 接下来我们看看`struct file`里面的内核缓冲区长什么样。
 
-![image-20241125102242565](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251022796.png)
+![image-20241125102242565](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251022796.png)
 
 `struct file`内部还有一个指向`struct address_space`的指针
 
 而在`struct address_space`内部，有一棵树，描述着存储文件内容的页号
 
-![image-20241125102617002](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251026827.png)
+![image-20241125102617002](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251026827.png)
 
-![image-20241125102938822](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251029523.png)
+![image-20241125102938822](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251029523.png)
 
 这种树称为基数树或者基树，是一种比较少见的数据结构。
 
-![image-20241125104007336](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251040551.png)
+![image-20241125104007336](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251040551.png)
 
 基树的节点中有一个指针数组`slots`，其类型为`void*`，这意味着它可以指向不同类型的地址。
 
@@ -567,11 +567,11 @@ struct page {
 
 在下图中，我们假设指针数组的元素个数为3。深度为2。
 
-![image-20241125105447916](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251054008.png)
+![image-20241125105447916](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251054008.png)
 
 而在叶节点中，其`void*`指向的不是树的其它节点，而是`struct page`对象
 
-![image-20241125105831321](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411251058401.png)
+![image-20241125105831321](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411251058401.png)
 
 而每个`page`都描述着一个页框，这些页框就是内核级的缓冲区。
 

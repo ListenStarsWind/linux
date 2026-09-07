@@ -30,13 +30,13 @@ struct task_struct
 }
 ```
 
-![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191417075.png)
+![绘图1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191417075.png)
 
 为了方便描述，我们把PCB中节点的起始地址（也就是prev  next指向的位置）叫做start。
 
 那怎么找到PCB起始地址呢？首先我们要算出`link`这个结构体成员相对PCB起始地址的偏移量。试想一下，假如现在有个PCB的起始位置就位于0地址处，那`link`成员的起始地址起始就是`&((task_struct*)0->link)`。
 
-![image-20241019143130629](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191431742.png)
+![image-20241019143130629](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191431742.png)
 
 `(task_struct*)0`就是这个假想PCB的地址，用它可以访问`task_struct`中的成员`link`，得到`link`之后再取地址便能得到这个`link`的地址，然后就是计算`link`相对起始地址的偏移量，为了让地址以整数形式运算所以要强转成`char*`：
 
@@ -97,19 +97,19 @@ F S   UID   PID  PPID  C PRI  NI ADDR SZ WCHAN  TTY          TIME CMD
 [sudo] password for wind:
 ```
 
-![image-20241019165402468](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191654611.png)
+![image-20241019165402468](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191654611.png)
 
 按下`r`：
 
-![image-20241019165436499](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191654624.png)
+![image-20241019165436499](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191654624.png)
 
 输入调整进程PID，回车：
 
-![image-20241019165527831](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191655955.png)
+![image-20241019165527831](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191655955.png)
 
 输入新的`NI`值，回车，如果输入的`NI`值超出范围，会按照最近的极值计算，比如输入-30会按照-20修改：
 
-![image-20241019165803418](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410191658532.png)
+![image-20241019165803418](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410191658532.png)
 
 按`q`退出top界面
 

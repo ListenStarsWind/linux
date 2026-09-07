@@ -56,13 +56,13 @@
 
 画的不太好看, 但我觉得意思是表达够的.
 
-![image-20250218215225706](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250218215225836.png)
+![image-20250218215225706](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250218215225836.png)
 
 其实上面的这些和线程都没什么关系,  之前我们在进程地址空间哪里没有细说具体的转化过程, 在这里给补上.
 
 对于线程来说, 一般来说, 真正需要具体安排的资源就是代码区和栈区, 其它都是直接共用进程的, 其它资源都是全局性的, 不管在进程的哪里, 理论上都应该能被看到, 线程又是进程的一部分, 所以自然是直接公用的, 栈区我们后面再谈, 对于代码区的分配其实很简单, 对于我们C/C++来说, 代码被包含在特定的函数中, 所以想要线程执行某个代码, 只要函数地址交给线程就行了.
 
-![image-20241214160114166](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214160114236.png)
+![image-20241214160114166](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214160114236.png)
 
 当然, 可能会有一些复杂情况, 但这里仅仅是引言, 所以就不讲那么多了.
 
@@ -70,7 +70,7 @@
 
 我们一般说: "线程比进程更轻量化", 这到底是什么意思呢? 这就需要对线程和进程进行相互比较.
 
-![image-20250219075157806](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250219075157931.png)
+![image-20250219075157806](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250219075157931.png)
 
 首先, 就线程的创建和销毁来看, 线程明显是要比进程更加轻量化的, 在上面我们已经说过, 对于线程来说, 真正要创建的其实就是`task_struct`, 其它的都可以直接共用进程原有的内核数据;
 
@@ -78,7 +78,7 @@
 
 我们知道, 冯诺依曼计算机结构采用的是分级缓存机制, 这个机制我们就不具体说了, 有外存, 内存, 但实际上CPU内部也是有缓存的, 我们把这个缓存叫做"cache", 我们可以在`shell`界面通过`cat /proc/cpuinfo`指令查询`cache`的大小.
 
-![image-20250219084754394](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250219084754613.png)
+![image-20250219084754394](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250219084754613.png)
 
 我这里是多核CPU, 所以有多个`cache`, `cache`下面还可以作更细的划分, 在这里我们就不提了, 我们看到`cache`其实还是很大的, CPU会把频繁用到的数据或者是即将运行的代码加载到这里, 运用局部缓存原理, 提高数据命中率.  因为`cache`中的数据会被频繁访问, 所以我们有时会把这些数据称为"缓存的热数据".  对于进程的切换来说, `cache`可能只做小范围的更新, 而对于进程的切换来说, `cache`就需要大范围的更新.
 
@@ -145,7 +145,7 @@
 
 我们先认识第一个接口, `pthread_create`, 它负责生成一个新的线程
 
-![image-20250221091837587](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250221091837833.png)
+![image-20250221091837587](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250221091837833.png)
 
 ```cpp
 #include <pthread.h>
@@ -434,7 +434,7 @@ int main()
 
 上面我们只要说的是线程的创建, 现在我们来说说线程的等待. 线程也是有等待机制的, 因为线程也占据着一些进程资源, 所以要用等待的方式将已经退出的线程资源回收, 并且获取线程的运行结果, 线程创建肯定是要给它安排任务的, 当它们执行完后, 主线程就需要回收它们的运行结果, 在形式上, 就是`thread_behavior`的`void*`返回值.
 
-![image-20250221154817514](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250221154817643.png)
+![image-20250221154817514](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250221154817643.png)
 
 ```cpp
 #include <pthread.h>
@@ -645,7 +645,7 @@ int clone(int (*fn)(void *), void *child_stack,
 
 我们强调, 在系统层是没有线程这一概念的, 只有轻量级进程的概念, 线程库通过对轻量级进程的操作, 为我们在应用层上实现了线程, 同时, 线程库也需要对这些线程进行一定的管理, 所以线程控制块是线程库及其上层才有的概念, 线程控制块中包含许多信息, 比如, 线程在系统层对应的轻量级进程是哪一个, 运行在哪个栈上, 又因为线程库是链接库, 所以它实际上位于地址空间的共享区上, 所以线程库实际上是从共享区开辟一处空间作为线程的独立栈的.由于这种线程实际是在应用层, 所以可以叫做用户级线程
 
-![image-20250222092334899](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250222092334994.png)
+![image-20250222092334899](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250222092334994.png)
 
 在这里, 我通过 clone 模拟实现了 `pthread`, 并且是以 C++的风格
 
@@ -2410,11 +2410,11 @@ class blocking_queue {
 
 在实践中, 往往不会把`int`传来传去, 而是更喜欢传函数对象, 让消费者去执行任务.    
 
-![image-20250304144139195](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250304144139544.png)
+![image-20250304144139195](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250304144139544.png)
 
 任务从哪里来的, 很明显是从其它外设那里得来的, 比如, 网卡中的网络请求,  用户在远端发出一个请求, 通过网络传到服务器, 被生产者接收,  生产者将这些请求包装成具体的可调用对象, 放入阻塞队列中,  消费者则从其中取出任务, 对其进行回调操作.  所以说上面的这张图画得并不完整, 甚至可以说是缺少了很关键的部分, 那就是生产者和消费者在非临界区中的行为.
 
-![image-20250304145600932](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250304145601157.png)
+![image-20250304145600932](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250304145601157.png)
 
 为什么我说这是关键内容, 因为这正是生产消费者模型高效性的体现.   诚然,  消费者与消费者之间具有互斥性, 生产者与生产者之间也具有互斥性,  生产者与消费者之间具有互斥性与同步性,  总之, 临界区在任何时候都最多只有一个执行流在运行, 因为临界区是串行的, 所以看上去并不高效, 可为什么, 又说生产消费者模型具有高效性?
 
@@ -2609,7 +2609,7 @@ if (_q.size() == 0)
 
 怎么把上面的代码改成多生产多消费呢? 其实很简单, 就是多创建几个线程, 除此之外就几乎没有要改的了, 因为多生产和多消费的唯一区别就是之前我们说的这张图中的非临界区域变成并行处理了, 非临界区变成并行就变成并行呗,  不会有什么问题, 而且甚至是好事, 增加了并行度, 效率更高了, 至于临界区, 在我们处理完伪循环问题后和之前的单生产单消费相同, 还是任何时候都最多只能有一个线程运行, 没有发生变化.
 
-![image-20250304145600932](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250304145601157.png)
+![image-20250304145600932](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250304145601157.png)
 
 ```cpp
 int main()
@@ -2727,11 +2727,11 @@ int sem_destroy(sem_t *sem);
 
 环形队列我们之前说过, 不过已经很长时间了, 其在逻辑上是个环, 遵循着先进先出的原则
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202408131339375.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202408131339375.mp4"></video>
 
 其在物理层, 可以以数组的方式实现, 每入一个数据, `rear`加加一次, 每次加加后要进行模运算, 防止其越界. 
 
-![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202408141051212.png)
+![绘图1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202408141051212.png)
 
 环形队列判空只需要看看`rear`和`front`是否相同即可.    `rear`指向的是下一个数据写入的位置, 当`rear->next`为`front`时, 就意味着队列满了.当然, 对于数组来说, 是`(rear + 1) % size`为`front`,   或者也可以引入一个计数器, 标记已经用了或者还剩多少空间,   既然它是计数器, 那我们就可以交给信号量来做, 而在内部不再判断状态., 有计数器就可以不多开辟一个空间了, 当两指针相遇, 信号量为零就是满了, 没满就是空的.
 
@@ -3160,13 +3160,13 @@ int main()
 
 我们看看效果
 
-![image-20250307121542510](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250307121542685.png)
+![image-20250307121542510](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250307121542685.png)
 
 不是特别有序, 这是因为`producer`是一个一个创建的, 创建之后调度顺序也不同, 但这种程度的乱没有实质影响, 它还是可以正常的进行写读的.
 
 去掉`sleep`是这种样子.
 
-![image-20250307123031728](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250307123031840.png)
+![image-20250307123031728](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250307123031840.png)
 
 我们看到同一个序号总是一块一块地跑, 这可能是因为其它线程从阻塞到唤醒还是需要一定时间的, 所以在这个过程中, 就是同一个序号中线程在运行, 但也问题不大, 那些进入二级竞争(已经获得信号量但未获得锁)的线程被唤醒后会接替工作, 不会让一个线程一直运行.
 
@@ -3321,7 +3321,7 @@ int main()
 
 运行结果如下, 本来我担心打印效果可能不太好, 但其实还行
 
-![image-20250307133014733](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250307133014876.png)
+![image-20250307133014733](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250307133014876.png)
 
 ## 线程池
 
@@ -3444,7 +3444,7 @@ int main()
 }
 ```
 
-![image-20250307162742158](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250307162742405.png)
+![image-20250307162742158](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250307162742405.png)
 
 我们的线程池还有一些东西没写, 比如我们没有`join, detach`之类的东西, 就不写了.
 

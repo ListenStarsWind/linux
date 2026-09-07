@@ -18,7 +18,7 @@
 
 我们先回顾一下C语言中的文件接口
 
-![image-20241110191502661](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411101915767.png)
+![image-20241110191502661](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411101915767.png)
 
 `fopen`返回的是C语言库中的自定义类型`FILE`的指针，`FILE`被称为文件指针，在windows环境下，也有句柄的叫法。
 
@@ -86,7 +86,7 @@ int main()
 
 这次我们多睡一会，看看当前工作路径。通过`/proc/`路径
 
-![image-20241110200527983](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102005071.png)
+![image-20241110200527983](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102005071.png)
 
 ```cpp
 #include<stdio.h>			//fopen
@@ -114,15 +114,15 @@ int main()
 }
 ```
 
-![image-20241110201404843](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102014933.png)
+![image-20241110201404843](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102014933.png)
 
 来到家目录下，我们也看到了刚创建的文件了
 
-![image-20241110201546517](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102015594.png)
+![image-20241110201546517](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102015594.png)
 
 接下来我们往文件里写写信息
 
-![image-20241110202327209](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102023284.png)
+![image-20241110202327209](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102023284.png)
 
 The function fwrite() writes nmemb elements of data, each size bytes long, to the stream pointed to by stream, obtaining them  from  the  location given by ptr.
 
@@ -242,7 +242,7 @@ logbook.txt  makefile
 hello C I/O Interfaces[wind@starry-sky Debug]$ vim logbook.txt
 ```
 
-![image-20241110204951103](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102049181.png)
+![image-20241110204951103](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102049181.png)
 
 由于`\0`是不可见的，所以对于文本编辑器来说，它是乱码。用cat 可能体现不出来。
 
@@ -258,7 +258,7 @@ hello C I/O Interfacesabcd
 [wind@starry-sky Debug]$ vim logbook.txt
 ```
 
-![image-20241110205937749](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102059843.png)
+![image-20241110205937749](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102059843.png)
 
 不过这不是什么大问题。
 
@@ -292,7 +292,7 @@ hello C I/O Interfaceshello C I/O Interfaceshello C I/O Interfaces[wind@starry-s
 
 接下来我们稍微提及一下，我们知道C/C++程序在运行时会默认打开三个流，或者说文件？叫文件流吧。
 
-![image-20241110212426387](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102124488.png)
+![image-20241110212426387](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102124488.png)
 
 它们是标准输入流 (`stdin`)、标准输出流(`stdout`) 和 标准错误流 (`stderr`)。在 Linux 中，“一切皆文件”是一个核心思想，这三个流实际上就是键盘和显示器的文件抽象。
 
@@ -302,7 +302,7 @@ hello C I/O Interfaceshello C I/O Interfaceshello C I/O Interfaces[wind@starry-s
 
 `stdout` 和 `stderr` 的区分，可以帮助我们更好地处理程序的输出，尤其在需要单独重定向错误信息时。比如，可以将正常输出和错误输出分别重定向到不同的文件中，方便调试和日志记录。
 
-![image-20241110213429244](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411102134339.png)
+![image-20241110213429244](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411102134339.png)
 
 写个代码看看？
 
@@ -372,7 +372,7 @@ hello C I/O Interfaces 1024
 
 首先我们知道文件是存储在各类外设中的，典型的就如磁盘。因此，对于装载了操作系统的计算机，用户对文件的访问必须经过系统和驱动等中间层。换句话说，在这种情况下，所有语言层面的文件接口都会封装系统调用。接下来，我们来了解一下这些接口的实现方式。
 
-![image-20241111083311077](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411110833407.png)
+![image-20241111083311077](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411110833407.png)
 
 我们主要说`int open(const char *pathname, int flags, mode_t mode);`这个说好了，`int open(const char *pathname, int flags);`就自然会用了，而对于`int creat(const char *pathname, mode_t mode);`，它其实只能创建文件，功能太少了，就不说了。
 
@@ -556,7 +556,7 @@ total 20
 
 倒是确实创建过来了，但看着不太对劲，文件权限方面。有色彩更能看出来。
 
-![image-20241111095507719](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411110955965.png)
+![image-20241111095507719](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411110955965.png)
 
 实际上，如果不给权限就创建文件的话，系统就会随机给权限，此时就必须使用有第三个参数的 open 了。
 
@@ -606,7 +606,7 @@ total 20
 
 权限掩码把 others 的写权限筛除了。那如果就是要 666 怎么办？不用担心，可以调用系统接口`umask`，让进程使用自己的权限掩码，而不使用系统默认的系统掩码。
 
-![image-20241111101309243](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111013455.png)
+![image-20241111101309243](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111013455.png)
 
 ```cpp
 #include <stdio.h>			//fopen
@@ -646,11 +646,11 @@ total 20
 
 有open 就有 close ,close的参数就是open返回的文件描述符
 
-![image-20241111102131723](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111021952.png)
+![image-20241111102131723](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111021952.png)
 
 文件打开了就要被修改
 
-![image-20241111102340856](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111023014.png)
+![image-20241111102340856](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111023014.png)
 
 `ssize_t write(int fd, const void *buf, size_t count);`  第一个参数`fd`是文件描述符，第二个参数`buf`就是写入数据的起始地址，第三个参数`count`描述写入数据的字节数。
 
@@ -820,15 +820,15 @@ abcde
 
 `struct file`中存储着文件的相关信息，它是对文件本身的抽象描述，其中包括，文件的磁盘位置，文件的权限信息，当前的读写位置（光标的位置），哪个进程打开的，两个`struct file*`指针，用来索引上一个和下一个`struct file*`；除此之外，系统还会为该文件创建一个内核层面的缓冲区，定时地把缓冲区里的信息写回磁盘。
 
-![image-20241111112939418](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111129550.png)
+![image-20241111112939418](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111129550.png)
 
 在进程控制块中，有一个`struct files_struct *`类型的指针，名为`files`，`files`指向该进程专属的一个结构体，该结构体中又分为若干部分，其中一部分是个指针数组。
 
-![image-20241111115744271](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111157430.png)
+![image-20241111115744271](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111157430.png)
 
 当进程打开一个文件后，系统就会把文件对应的`struct file`结构体指针导入到`struct files_struct`中数组的空位置中，从而让进程和文件之间建立联系。实际上，open 返回的文件描述符就是这个数组的下标。
 
-![image-20241111131958772](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111319855.png)
+![image-20241111131958772](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111319855.png)
 
 下面我们用程序打印一下文件描述符。
 
@@ -910,7 +910,7 @@ hello linux
 
 来些读操作
 
-![image-20241111140612705](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111406913.png)
+![image-20241111140612705](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111406913.png)
 
 ```cpp
 #include <stdio.h>			//fopen
@@ -941,7 +941,7 @@ int main()
 
 从系统层面的文件流转换到C环境下，需要加上`\0`，所以这次要把`sizeof(buffer)`减一，注意不能用`strlen`，`strlen`是用来计算字符串的长度的，buffer 现在是空的，第一个元素就是`\0`，所以不能用`strlen`，read 会返回读取到的元素个数，失败时返回-1，因为文件流中的字符串没有`\0`所以读到C环境中要在末尾加上`\0`，不过因为这里对字符数组做初始化了，所以这里去掉其实没什么大问题，不过为了安全起见，最好还是不管有没有初始化，都在末尾添上`\0`。
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411111404241.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411111404241.mp4"></video>
 
 ----------
 

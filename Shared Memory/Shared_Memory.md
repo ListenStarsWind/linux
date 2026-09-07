@@ -6,7 +6,7 @@
 
 就是系统在物理内存中找到一处空闲空间，将其映射到进程地址空间而已。具体被映射到进程地址空间的共享区。
 
-![image-20241214160114166](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214160114236.png)
+![image-20241214160114166](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214160114236.png)
 
 使用共享内存建立信道就两步：一，从物理内存上找处空闲区域；二，把物理地址与虚拟地址建立联系。在信道建立之后，共享内存的行为就像由`malloc`开辟的堆空间一样，不用通过系统接口直接读写。共享内存的释放也和堆空间很相似。
 
@@ -18,7 +18,7 @@
 
 先来看第一个接口，用于在物理内存上找到一处空闲区域`shmget`
 
-![image-20241214163431072](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214163431155.png)
+![image-20241214163431072](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214163431155.png)
 
 我们先看`shmget`的第二个参数`size`，该参数用于描述申请共享空间的大小，单位为字节。然后再来看看它的返回值，它返回一个整数，这个整数是一个唯一标识符，用来在应用层区别不同的共享内存，如果`shmget`失败，则返回-1，给人的感觉就是文件描述附表的下标，但其实不是，稍后我们会实验。第三个参数`shmflg`用于描述共享内存的其它信息，比如获取方式，创建权限之类的，它使用的传参方式是比特位传参。
 
@@ -33,7 +33,7 @@
 
 实际上，这个`key_t`类型就是一个整型，那我们可不可以在代码上直接随手写一个整型，只要让通信进程的整型参数一致，就能在运行前让通信进程拥有相同的标识符呢？理论上可以，但实际上不行，因为随手写一个不能确保标识符唯一性，存在较大的可能与以往标识符重合，为此，系统为我们提供了一个接口，那就是`ftok`，`ftok`就是一套算法，虽说是系统提供的，但并没有对系统内核进行任何操作，因此在`man`手册中它被归类于语言接口。
 
-![image-20241214172114632](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214172114739.png)
+![image-20241214172114632](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214172114739.png)
 
 它借助于系统中天生就具有唯一性的东西：文件路径作为标识符唯一性的担保，也就是第一个参数`pathname`，除此之外，它还提供了一个整型参数`proj_id`，通过内部的一系列转换过程，将这两个参数转化为一个整型，这样就能大大减少标识符重复的可能。这两个参数的具体内容并不重要，重要的是，使用共享内存通信的进程要有相同的参数内容。
 
@@ -265,7 +265,7 @@ key        shmid      owner      perms      bytes      nattch     status
 
 接下来我们看看共享内存怎么映射到进程地址空间上。为此，我们需要使用`shmat`接口
 
-![image-20241214205621021](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214205621113.png)
+![image-20241214205621021](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214205621113.png)
 
 虽说`shmat`有三个参数，但实际上我们只要关心第一个，`shmid`自然不必多说，就是应用标识符，第二个参数是用于规定共享内存在共享区映射的具体起始地址，但进程地址空间的具体区域划分范围用户是不知道的，所以一般我们都设置为空，表示让系统自己决定具体映射到哪，第三个是进程级别权限，比如可以把一个共享内存以只读方式映射，这样，这个进程就只能读共享内存，而不能写。不过一般上，我们都直接设置为0，表示共享内存自己是什么权限。就以什么权限映射，它的返回值是映射区域的起始地址。这个接口用起来有点像`malloc`。
 
@@ -479,7 +479,7 @@ key        shmid      owner      perms      bytes      nattch     status
 
 除了进程退出能取消映射关系之外，也可以采用`shmdt`接口，`shmat`中的`at`是`attch`，意为附加，而`shmdt`中的`dt`是`detach`，意为分离。
 
-![image-20241214205621021](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214205621113.png)
+![image-20241214205621021](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214205621113.png)
 
 `shmdt`的使用方法就像是`free`，里面的参数`shmaddr`就是`shmat`返回的地址
 
@@ -608,7 +608,7 @@ key        shmid      owner      perms      bytes      nattch     status
 
 最后再说一个接口`shmctl`，它含有多种功能：获取共享内存段的状态，设置共享内存段的控制参数，删除共享内存段
 
-![image-20241215103128729](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241215103128871.png)
+![image-20241215103128729](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241215103128871.png)
 
 它的第二个参数`cmd`用于描述进行何种操作，比如`IPC_STAT`，用于获取共享内存的状态，通过第三个参数`buf`进行输出，`IPC_SET`用于对共享内存进行设置，很少用，`IPC_RMID`用于删除物理层面的共享内存，此时第三个参数没用，可以直接设为空，第一个参数就不多说了，它是共享内存标识符，不过我们上面的类中似乎记录标识符的成员，所以要再加一个`int`成员。
 
@@ -1178,16 +1178,16 @@ Please enter: ^C
 让我们先回顾一下共享内存的各种接口
 
 用于获取内核标识符的`ftok`(file to key)，将一个文件转化为唯一的关键字，文件是Linux中的稳定实体，它本身就具有唯一性，以它为担保生成的键值，是一个稳定且唯一的键值。用该键值就可以区分各种共享资源。
-![image-20241214172114632](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214172114739.png)
+![image-20241214172114632](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214172114739.png)
 
 用于创建共享内存的`shmget`，它返回一个用户级标识符
-![image-20241214163431072](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214163431155.png)
+![image-20241214163431072](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214163431155.png)
 
 用于把共享内存附加到进程地址空间中`shmat`
-![image-20241214205621021](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214205621113.png)
+![image-20241214205621021](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214205621113.png)
 
 用于对共享内存进行控制的`shmctl`
-![image-20241215103128729](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241215103128871.png)
+![image-20241215103128729](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241215103128871.png)
 
 共享内存面向用户的内核数据结构是
 ```cpp
@@ -1266,16 +1266,16 @@ memcpy(msg->mtext, &a, sizeof(mytype));
 ```
 
 消息队列同样要有内核级标识符，同样是用`ftok`获得
-![image-20241214172114632](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241214172114739.png)
+![image-20241214172114632](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241214172114739.png)
 
 消息队列的创建方式与共享内存相似，如果想要确保获得新的消息队列，需要使用`IPC_CREAT | IPC_EXCL`，如果想用现成的，就用`IPC_CREAT`
-![image-20241217150230872](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150231086.png)
+![image-20241217150230872](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241217150231086.png)
 
 消息队列不是内存块，有专门的读写接口，发送消息是`msgsnd`，接收消息是`msgrcv`
-![image-20241217150501728](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150501965.png)
+![image-20241217150501728](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241217150501965.png)
 
 消息队列也有对应的控制接口
-![image-20241217150651663](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217150651849.png)
+![image-20241217150651663](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241217150651849.png)
 
 其面向用户的内核数据结构为
 
@@ -1321,9 +1321,9 @@ key        msqid      owner      perms      used-bytes   messages
 
 我们再瞅一眼信号量
 
-![image-20241217151452157](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217151452278.png)
+![image-20241217151452157](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241217151452278.png)
 
-![image-20241217151529536](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241217151529701.png)
+![image-20241217151529536](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241217151529701.png)
 
 
 
@@ -1367,7 +1367,7 @@ struct ipc_perm {
 
 在有了上面的铺垫之后，我们来理解一下信号量。信号量的本质其实就是一个计数器，也就是`int count`，这个计数器的值表示一份临界资源中还剩几块临界资源可以被使用。就像内存或者文件系统一样，一个临界资源其内部也是会被分成多个块的，比如磁盘有分区，分区有各种块，而`Date blocks`里面还有一个个`Date block`。
 
-![image-20241120194848049](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411201948217.png)
+![image-20241120194848049](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411201948217.png)
 
 一个临界资源也是如此，一个临界资源可以被细分成若干个块，就像一个电影院里面有多个座位，每个块在在某个时刻都只能被一个执行流访问，就像一个座位只能坐一个人一样，要么没执行流访问这个块，要访问，只能有一个执行流访问该块。
 

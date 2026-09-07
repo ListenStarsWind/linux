@@ -369,9 +369,9 @@ failed div, errno:-1
 
 现在我们又创建了两个头文件及其对应的源文件。
 
-![image-20241129094054168](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411290940357.png)
+![image-20241129094054168](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411290940357.png)
 
-![image-20241129094002360](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411290940621.png)
+![image-20241129094002360](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411290940621.png)
 
 ```shell
 [wind@starry-sky Debug]$ sudo unlink /usr/include/wind_link_h
@@ -812,7 +812,7 @@ failed:A system is never complete.
 
 我们知道，当用户要求执行某个程序时，系统就会通过一系列的机制把对应的文件加载到物理内存中，并通过页表将物理内存映射为虚拟内存，这样进程在实际运行是只要关注自己的虚拟地址空间即可，而不必关注数据在物理内存的存储位置和存储形式。
 
-![image-20241129133052929](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411291330021.png)
+![image-20241129133052929](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411291330021.png)
 
 动态库也是文件，当进程需要动态库时，就会触发缺页中断，之后系统就会在磁盘中找到对应的动态库文件将其加载到物理内存中。既然程序是在虚拟地址空间的视角下进行运行的，很明显，被加载到内存中的动态库数据也会通过页表映射到虚拟地址空间上，映射到哪里呢？就是虚拟地址空间的共享区。也就是说共享区中存储着动态库的代码和数据，当进程调用动态库时，就会从正文代码跳转到共享区的代码上，调用结束后就重新跳回正文代码。
 
@@ -828,7 +828,7 @@ failed:A system is never complete.
 
 让我们先回到计算机早期阶段，那时候的程序是用二进制写的，打在纸带上，所以纸带的地址就是程序还未运行的地址，当然，那时候地址还没现在划分这么细，但可以肯定的是，可程序文件中是有地址的，大概长这样。
 
-![image-20241129143217714](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411291432914.png)
+![image-20241129143217714](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411291432914.png)
 
 就是汇编指令前面的那堆地址，重新调试，会发现这些前面的地址都是不变的。
 

@@ -2,7 +2,7 @@
 
 ## 纲要
 
-![f765ee5caab883cad42305126d5611e](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410081845970.png)
+![f765ee5caab883cad42305126d5611e](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410081845970.png)
 
 整个项目我们主体采用面向对象的思想。设计一个类，可以存储项目的相关信息和方法，可以想到，可能会有多个对象，即多个事件的进度条，所以我们在进度条这个类里声明了一个用于存储事件名称的成员变量`_EventName`，那要用什么做初始命名呢？我用一个静态成员变量`_Count`去统计已经实例化的对象个数，并把它们的序列号作为事件的默认名，我个人觉得类`statisticians`比`ProgressBar`更重要。`statisticians`的主要职责是统计其它类的运行状态，它是一种基层信息的反馈机制，我个人觉得它完善之后肯定是很有用的。
 

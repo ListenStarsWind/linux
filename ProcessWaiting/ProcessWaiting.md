@@ -110,7 +110,7 @@ parent process: pid->13691 child pid->13692 count:0
 
 我们看看系统接口`wait`
 
-![image-20241102123133733](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411021231858.png)
+![image-20241102123133733](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411021231858.png)
 
 我们先用`wait`，`wait`实际上是`waitpid`的精简版。我们先不关心参数`status`，它的返回值就是等待到的进程PID，我们先来看看被等待之后，子进程能不能被回收。
 
@@ -586,7 +586,7 @@ int main()
 
 ```
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411021506822.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411021506822.mp4"></video>
 
 不过我们对位操作不太熟，可以用相应的宏`WIFEXITED(status)`和`WEXITSTATUS(status)`
 
@@ -646,9 +646,9 @@ int main()
 
 我们可以从LINUX内核原码中`.\linux\include\linuxsched.h`中看到PCB，也就是`task_struct`中的异常信息编号和退出码。
 
-![image-20241102155434456](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411021554039.png)
+![image-20241102155434456](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411021554039.png)
 
-![image-20241102155455614](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411021554187.png)
+![image-20241102155455614](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411021554187.png)
 
 随口说一声，因为进程具有独立性，所以只能通过系统调用接口获取子进程退出码。比如不可以用全局变量作退出码（子进程退出时，把退出码赋给这个全局变量，父进程再查看这个全局变量，从而获取子进程退出码），因为这个全局变量只是虚拟地址相同而已，其物理地址已经不相同了，当子进程写入全局变量时，就会发生写时拷贝。父进程也不能直接接触子进程获得退出码，如果父进程可以直接访问子进程PCB，进程之间就会存在相互干扰的可能，这样也是不行的，系统不允许两个进程直接接触，必须要有中间层。
 

@@ -25,7 +25,7 @@ int main()
 
 这里要略微说一下`fwrite`这个接口。
 
-![image-20241116190429538](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411161904635.png)
+![image-20241116190429538](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411161904635.png)
 
 `fwrite`与`printf`不同，它是一种非格式化函数。`printf`允许通过格式说明符（如`%d`、`%s`）指定输出格式，便于进行数据类型的转换和格式化。这在处理输出时非常重要，因为像显示器或键盘这样的字符设备最终只能处理字符数据。因此，语言接口必须将数据转化为字符形式，才能通过系统接口输出。例如，当`printf`打印整型变量时，它会先将该变量转换成字符数据，然后传递给系统接口。同样，`scanf`中的格式控制也起到了数据类型转换的作用。
 
@@ -187,7 +187,7 @@ hello fwrite
 
 在进行I/O操作时，语言层的I/O接口会首先将数据写入语言层的缓冲区，然后再将其传输到内核级缓冲区。而系统I/O接口则跳过语言层缓冲区，直接操作内核级缓冲区。
 
-![image-20241116205256784](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411162052885.png)
+![image-20241116205256784](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411162052885.png)
 
 为了便于理解，我们可以将信息写入内核缓冲区视为硬件立即表现相应行为的触发条件。
 
@@ -369,7 +369,7 @@ int main()
 }
 ```
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411171205761.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411171205761.mp4"></video>
 
 ```shell
 [wind@starry-sky Debug]$ while : ; do cat log.txt; sleep 1; echo "--------------"; done

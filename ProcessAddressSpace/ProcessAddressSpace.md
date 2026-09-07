@@ -247,7 +247,7 @@ val:8 val->0x7fffc67fefe4
 
 数据实际存储在物理内存中，为了在虚拟地址和物理内存之间建立联系，我们引入一个称为“页表”的数据结构。为了简化理解，当前我们可以把页表看作一张映射表，一侧是虚拟地址，另一侧是物理地址。当程序需要访问虚拟地址中的数据时，就将该虚拟地址交给页表，页表即可返回对应的物理地址，从而定位到实际的数据存储位置。
 
-![无标题](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261214255.png)
+![无标题](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261214255.png)
 
 当父进程创建子进程时，内核会基于父进程的模板，为子进程创建一个几乎相同的 `struct task_struct` 结构体，同时也为子进程创建对应的进程地址空间和页表。刚开始时，父子进程的进程地址空间与页表中的映射关系是完全相同的，即页表中的虚拟地址和物理地址的映射完全一致。因此，父子进程共享相同的物理内存中的代码和数据。
 
@@ -269,7 +269,7 @@ val:8 val->0x7fffc67fefe4
 
 小明和小张是幼儿园的两位小朋友。他们共用一张桌子，这张桌子长100cm，这样的话，小明和小张的可被使用空间范围就是[0, 100]。小明没啥边界感，有时没事就去小张的范围，小张就受不了，在桌子上化了一根线：我们约法三章，线左边的部分是你的地盘，右边是我的地盘，你要再越界，我就打你。
 
-![image-20241026132356686](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261323741.png)
+![image-20241026132356686](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261323741.png)
 
 用C怎么描述一下这件事呢？
 
@@ -291,7 +291,7 @@ struct destop_area line_area = {{1, 50}, {51, 100}}
 
 有一天，小明又把手伸到小张那里，小张多次警告之后，就向小明开打了，结果小明没打过小张，为了给小张一点教训，小张把线往左边移了10cm，并告诉小明，从现在开始，如果小明再越界，就再把线左移10cm。
 
-![image-20241026134239754](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261342794.png)
+![image-20241026134239754](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261342794.png)
 
 这件事从C可以这样描述：
 
@@ -308,7 +308,7 @@ line_area.xiaozhang.start-=10;
 
 既然要管理，就需要先组织，再描述。进程地址空间在内核中的具象化类型就是`struct mm_struct`。在Linux内核代码的`/include/linux`文件夹下可以看到它的定义。
 
-![image-20241026152505576](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261525162.png)
+![image-20241026152505576](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261525162.png)
 
 ```c
 struct mm_struct{
@@ -329,11 +329,11 @@ struct mm_struct{
 
 顺手看看`struct task_struct`
 
-![image-20241026153426991](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261534561.png)
+![image-20241026153426991](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261534561.png)
 
 描述了进程地址空间的地址
 
-![image-20241026153652915](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261536481.png)
+![image-20241026153652915](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261536481.png)
 
 ---------------------
 
@@ -388,7 +388,7 @@ CPU中有一个名为`cr3`的控制级别的寄存器，用来描述当前被CPU
 
 页表也是一种数据结构，除了描述了虚拟地址和物理地址的映射关系，还描述了这些地址的权限和归属。
 
-![无标题](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410261742384.png)
+![无标题](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410261742384.png)
 
 `*str = 'H'`尝试对常量字符串`hello world`中的首字母`h`改为`H`，当进程发出这个请求时，CPU就会通过`cr3`找到页表，发现它的物理地址是`0x12345`，接着系统发现这个地址是只读的，而这个请求却想写入，于是系统就会终止CPU的进一步操作，不让其在物理内存上进行操作，接着系统会以进程发出危险请求为由强行终止该进程。
 

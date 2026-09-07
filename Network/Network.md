@@ -18,7 +18,7 @@
 
 我们在写生产消费者模型的时候, 为了让程序的运行效果更加明显, 我们总喜欢往里面加些信息的打印.   最开始, 我们把打印放到锁外, 但由于所有的线程用的都是同一个屏幕, 所以经常会出现打印混乱的情况, 甚至, 有些打印虽然不混乱, 但内容具有误导性, 在实际运行中, 实际上是生产者先运行, 然后消费者再运行, 但在打印的时候, 消费者却率先运行执行了打印指令, 先打印了消费数据的信息, 然后再是生产者打印生产数据的信息.         为了解决类似问题, 同时考虑到多线程程序设计时的原则:  临界资源应该尽可能放到一块进行访问,   所以我们设计了一个数据守卫层,   把一个数据放入容器必须要经过数据守卫层的插入接口, 而将数据取出容器也必须经过数据守卫层的取出接口, 生产者和消费者在经过守卫层的插入取出接口时, 将会执行由用户提供的回调函数: 打印相关的消息.  单从最外层的线程行为函数上来看, 完全看不到数据守卫层的痕迹, 数据以什么样的形式进入, 它就会以什么样的形式被取出, 在逻辑上就像是直接相连一样. 稍后我们会在网络中也见到相似的场景, 只不过网络层数更多了.  
 
-![image-20250311121752401](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311121752492.png)
+![image-20250311121752401](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311121752492.png)
 
 什么是协议, 协议就是一种约定, 在线程行为层, 我们用的都是同一个类型, 生产者生产一个任务, 消费者就能得到一个任务, 它们在逻辑上是相连的, 我们可以完全不考虑其它层的情况, 在容器层, 容器也不在乎生产者生产的是什么任务, 甚至线程行为层换成别的`task`类, 它也无所谓, 同样的, 它也不需要考虑守卫层内部的具体情况, 它们在逻辑上也是相连的, 我往下传了什么对象, 对面的就会收到什么对象, 在逻辑上也是相连的. 对于数据守卫层来说, 它也不在乎上层具体是怎么实现的, 这个容器可以用队列, 也可以用数组, 还可以用其它接口, 我不在乎, 我只需要在收到对象的时候, 顺手执行一下主线程提供的信息打印函数, 给容器层数据的时候再顺手执行一下对应的打印函数即可.
 
@@ -28,17 +28,17 @@
 
 对于网络来说, 更是要分层.  两个用户, 张三和李四, 你们在进行网络通信时, 你也不需要考虑什么网络问题, 你们要关心的, 就是张三说的话李四能听懂, 李四说的话张三也能听懂, 这就够了, 我们在用户层要遵循人类语言协议, 要说大家都能听懂的话, 在感觉上, 底层的技术细节被隐藏了, 张三在电脑上输入的是什么话, 李四收到的就是什么, 反之亦然, 张三和李四就像是在直接沟通, 他们在逻辑上是连为一体的.
 
-![image-20250311130324127](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311130324201.png)
+![image-20250311130324127](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311130324201.png)
 
 我们在语言层用的是汉语, 要遵循汉语的协议,  设备层用的是座机.也要准许相应的座机协议. 
 
 现在我们换成无线电, 那该说什么话, 就说什么话, 不需要在乎设备层的更换.
 
-![image-20250311130624544](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311130624598.png)
+![image-20250311130624544](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311130624598.png)
 
 如果改成说英语, 那设备层也是该怎么样就怎么样, 不需要因为语言的改变而做一些特殊操作
 
-![image-20250311130748218](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311130748269.png)
+![image-20250311130748218](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311130748269.png)
 
  网络要分层有内因也有外因.   从外因上说, 是因为分层天然能产生高内聚低耦合, 这是一种好的程序设计思路. 从内因来说, 网络通信中额问题天然是分层的, 首先要保证每个主机能相互连接起来, 这样一个主机到另一个主机才有通信的可能, 打个比方, 张三遭遇了海难, 到了一个孤岛上面, 那个孤岛旁边根本没有航线, 李四想要给张三一些东西根本无从谈起.  现在各个主机相连了, 这就确保, 最起码是存在一条路径, 能把主机`A`和主机`B`连起来, 这才有通信的可能.   确保最起码有这样一条路之后, 我们要保证数据在传输过程中, 不会迷路, 每遇到一个路口, 它都知道, 我应该往那条路走, 而不是往那条路走.   如果还是用之前的例子, 那就是要确保运输物资的那条船不要偏离航线.   接着, 张三收到了李四传来的物资, 接下来要解决的问题, 是张三要知道李四发的是什么东西, 知道这个东西该如何解释, 这就是应用层的事, 李四给张三发来一个火箭, 可以张三根本不会用, 那也是白搭.
 
@@ -46,7 +46,7 @@
 
 国际标准化组织提出了一种被称为"开放式系统互联"`Open Systems Interconnection`, 简称为`OSI`的概念模型., 它把网络从逻辑上分为了7层. 每一层都有相关、相对应的物理设备，比如路由器，交换机;  这个模型在理论上设计的非常好, 它的最大优点是将服务、接口和协议这三个概念明确地区分开来，概念非常清楚, 因此经常出现在教科书上,  已经成为了一种经典模型了.
 
-![image-20250311143430783](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311143431121.png)
+![image-20250311143430783](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311143431121.png)
 
 但是它分的实在太细了, 所以在日常工程实践中, 我们用的往往另一种简化的模型, 称之为"TCP/IP五层(或四层)模型 "
 
@@ -60,7 +60,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 - 传输层: 负责两台主机之间的数据传输. 如传输控制协议 (TCP), 能够确保数据可靠的从源主机发送到目标主机.  
 - 应用层: 负责应用程序间沟通，如简单电子邮件传输（SMTP）、文件传输协议（FTP）、网络远程访问协议（Telnet）等. 我们的网络编程主要就是针对应用层.  
 
-![image-20250311144200162](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311144200582.png)
+![image-20250311144200162](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311144200582.png)
 
 我们一般不操心, 实际上操心也没用, 物理层的事, 所以也有把TCP/IP说成是四层的.表示层和会话层是被归纳为应用层的.
 
@@ -70,7 +70,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 在继续谈网络之前, 先让我们把系统和网络放在一块说说.
 
-![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410111425950.png)
+![绘图1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410111425950.png)
 
 如图, 这是计算机的分层结构. 
 
@@ -82,7 +82,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 我们先来看张图
 
-![image-20250311163337436](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311163337511.png)
+![image-20250311163337436](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311163337511.png)
 
 这里要强调的是, 网络的各层都是依托在计算机上的, 不要光看到各种各样的网络层, 更要意识到, 它们背后是计算机的分层结构. 每个竖列都相当于上面我们那张计算机分层图的化简.
 
@@ -94,19 +94,19 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 现在客户想要对服务器发送一份数据, 应用层中就会首先在这份数据上加上应用层协议的报头. 报头和数据就构成了一份报文, 报头中有很多属性 描述了应用层协议的各种信息,  比如, 在下图中, 我们就在报头中加入了应用协议的版本号. 将来, 服务器的应用层会获得同样的一份报文, 会将其进行解包, 获得同样的数据.如果版本号是最新的, 那服务端就按照最新的方式来解释数据, 如果是老版本, 就要用对应的解释方式, 否则就会发生混乱, 造成信息的错误.
 
-![image-20250311173146538](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311173146617.png)
+![image-20250311173146538](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311173146617.png)
 
 我们说过, 通信必须贯穿协议栈, 所以这份报文将会被传到传输层, 传输层也要加上自己的协议报头. 传输层要保证数据在传输过程中不发生错乱, 所以需要给数据带上序号, 保证数据在传输过程中的有序性.
 
-![image-20250311173840509](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311173840571.png)
+![image-20250311173840509](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311173840571.png)
 
 网络层也是如此, 要加上对应的报头, 它要为数据的传输指引方向, 所以, 报头内容中含有描述数据传输过程中起始和终点位置的信息.
 
-![image-20250311174410581](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311174410646.png)
+![image-20250311174410581](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311174410646.png)
 
 接着这份报文会被传到链路层, 链路层亦会在其上加上自己的协议报头.
 
-![image-20250311174628581](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311174628650.png)
+![image-20250311174628581](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311174628650.png)
 
 我们把左边的过程称之为"数据自顶向下的交付", 这其实是一个不断封装的过程.
 
@@ -114,7 +114,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 之后, 报文就会在以太网中传播, 于是对面服务器的网卡就捕捉到了这条报文. 然后交给了以太网驱动程序, 因为用的是同样的链路层协议, 所以服务器的以太网驱动程序就可以识别出这条报文中哪些是链路层协议, 哪些是有效载荷, 于是它就把报头与有效载荷分离, 把有效载荷传到上一层, 上一层的"IP"协议就也能识别出自己层的报头, 就会让报头和有效载荷分离, 并把有效载荷传到上一层.... 最终, 用户就拿到了这份数据.   将报文中的有效载荷和报头分离就被称之为"解包"
 
-![image-20250311190636381](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311190636443.png)
+![image-20250311190636381](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311190636443.png)
 
 同层协议的报文都是相同的, 所以在逻辑上就相当于直接相连.  
 
@@ -132,11 +132,11 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 局域网中每个主机的网卡, 都有一串序列, 这就是每台主机在局域网中相互区分的唯一标识符,  称之为"Mac"地址, 当操作系统启动时, 就会读取网卡的"Mac"地址, "Mac"地址在理论上全球唯一, 但在实际上, 只需要同一个局域网下唯一即可.  
 
-![image-20250311195311448](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311195311538.png)
+![image-20250311195311448](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311195311538.png)
 
 我们假设上图代表的就是一个局域网,. 中间的那条线就是以太网, 图中的方框就是局域网中的主机, 每个主机都有自己的"Mac"地址, 当其中的一台主机发送数时, 链路层协议就会把报头拼接到自己的有效载荷上, 链路层报头就描述了数据的原始Mac地址和目标Mac地址. 之后当它把报文发出去后, 局域网中所有主机的网卡都会捕捉到这条报文
 
-![image-20250311200802566](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311200802619.png)
+![image-20250311200802566](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311200802619.png)
 
 如图H1向局域网中发出了一条报文, 目标是H6.
 
@@ -150,7 +150,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 在局域网中, 任何时候都只能有一定数目的主机发报文, 当超过该数目时, 就会发生数据碰撞问题,  为了应对这个问题, 一方面, 我们有碰撞避免算法, 另一方面, 我们可以在局域网中添加交换机, 交换机的作用就相当于把局域网分成两个小部分, 就类似与把一个50人的大班拆成25人的两个小班, 分别在两个教室里上课, 这样就能减少数据碰撞的可能. 
 
-![image-20250311204645010](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311204645083.png)
+![image-20250311204645010](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311204645083.png)
 
 在上图中, 整个局域网被交换机分成了左右两个子部分. 当左边没有发生数据碰撞时, 交换机就会让左边的报文进入右边, 而当左边出现数据碰撞时, 交换机就会拦下错误报文, 不让它的影响进一步扩大. 
 
@@ -164,7 +164,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 下面我们说数据怎么跨局域网中通信, 如图, 这是两个由路由器连接起来的两个局域网, 这里为了更简洁一些, 我们只画了起始主机和目标主机, 你可以脑补一下, 这两边其实还有很多主机,  但在这张图中被省略了.
 
-![image-20250313164558869](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250313164558971.png)
+![image-20250313164558869](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250313164558971.png)
 
 为了方便起见, 我们把左边使用以太网的局域网记为`E`(取自英文"Ethernet"以太的首字母), 右边使用令牌环网的局域网记为`T`(取自英文"Token"令牌的首字母), 客户主机和服务器主机是分别位于`E, T`中的两台主机, 它们将要进行网络通信.
 
@@ -174,7 +174,7 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 关于IP地址, 我们先来讨论三个话题: IP地址是什么, IP地址为什么要有, IP地址和Mac地址有什么区别.    为了弄清这些话题, 我们需要先假想一个生活场景.
 
-![bigmap](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250313171031567.jpg)
+![bigmap](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250313171031567.jpg)
 
 这是一张中华人民共和国的行政地图. 
 
@@ -194,15 +194,15 @@ TCP/IP通讯协议采用了5层的层级结构，每一层都呼叫它的下一�
 
 首先仍是老样子, 客户在应用层发出了一个请求, 请求被发到传输层, 传输层的TCP协议为负载添加了报头, 并继续向下发送, 网络层的IP协议也为负载加上了自己的报头, 报头中含有起始目标IP地址和目标IP地址, 然后继续向下交付, 数据链路层的以太网协议也增加了自己的报头, 为了让数据到达另一个局域网, 数据需要先达到两个局域网中的公有部分, 也就是路由器上, 于是以太网协议在报头中标记的起始Mac地址是客户主机的Mac地址, 而终点Mac地址是路由器的Mac地址.
 
-![image-20250313184349275](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250313184349411.png)
+![image-20250313184349275](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250313184349411.png)
 
 于是, 这份报文被发到了局域网中, 对于局域网中的其它主机来说, 它把数据链路层的报头解出分析之后, 发现不是自己的, 所以就在链路层直接舍弃了, 而对于路由器来说, 它分析了链路层的报头, 发现, 这就是给自己的, 于是把负载又传到了网络层, 网络层的IP协议分析了收到报文的报头, 发现, 目标IP不是自己, 目标IP在另一头的局域网里面, 而另一边的局域网用的是令牌环协议, 于是它把这份报文又给了数据链路层的令牌环协议那里, 令牌环协议就给它封装了报头, 标记起始Mac地址是路由器, 目标Mac地址是服务器.
 
-![image-20250313185551401](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250313185551513.png)
+![image-20250313185551401](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250313185551513.png)
 
 后面的过程我们就不说了, 路由器往令牌环局域网中发了报文, 服务器的网卡捕捉到了这个报文, 这个报文的链路层用的也是令牌环协议, 所以服务器的链路层令牌环协议成功解包, , 并向上分用, 最后, 服务器就拿到了客户发出的请求. 
 
-![image-20250313190028954](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250313190029055.png)
+![image-20250313190028954](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250313190029055.png)
 
 正是由于网络层的IP协议实现了全球所有主机在网络上的统一, 大家用的都是IP报文, 所以尽管数据链路层的情况各异, 但所有报文在网络层都能被统一描述, 不管什么设备大家都能连上网. 网络在这一层是统一的, 所以它叫网络层. 
 
@@ -381,7 +381,7 @@ uint16_t ntohs(uint16_t netshort);
 - struct sockaddr_un：用于域间套接字，支持本地进程通信。
 - 原始套接字则更底层，这里暂不展开讨论。
 
-![image-20250314095326053](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250314095326170.png)
+![image-20250314095326053](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250314095326170.png)
 
 对于网络套接字和域间套接字，可以通过地址结构的前两个字节（即sa_family字段）来区分类型：
 
@@ -1449,11 +1449,11 @@ int main()
 
 在把宏作相应修改之后, 我们看到, 连接是正常的.
 
-![image-20250318124402585](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250318124403040.png)
+![image-20250318124402585](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250318124403040.png)
 
 再在`Permission denie`后面加个换行, 效果会更好
 
-![image-20250318124641978](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250318124642062.png)
+![image-20250318124641978](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250318124642062.png)
 
 ```shell
 [wind@starry-sky UDP]$ ./udpserver -8888
@@ -1857,7 +1857,7 @@ void Broadcast(std::string& who)
 }
 ```
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250318182115199.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250318182115199.mp4"></video>
 
 不过这里有个问题, 那就是输入输出混在一起, 如果有图形化界面, 那我们可以把界面分成两个区域, 一是发送区, 二是接收区, 这样看起来就会更好, 但是, 我们这里开不了图形化界面, 所以我们可以使用文件重定向的方式把打印信息输出到另一个终端上. 
 
@@ -1897,13 +1897,13 @@ c--------- 1 root    root   5, 2 Mar 16 11:14 ptmx
 
 效果如下:
 
-![image-20250318194409197](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250318194409482.png)
+![image-20250318194409197](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250318194409482.png)
 
 服务端是左下角终端启动的, 但别人发送的内容都会来到左上角的终端, 左下角只发挥着读取作用.
 
 但其实上, 我们也犯不着用代码实现重定向, 只要启动进程的时候用输出重定向就行了
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250318195847188.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250318195847188.mp4"></video>
 
 ------------
 
@@ -2676,7 +2676,7 @@ inline void service2(int sockfd, const char* ip, uint16_t port)
 
 来测试一下
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250320201619811.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250320201619811.mp4"></video>
 
 好的, 但多进程的版本还是有很大的缺点, 占用资源太多了,  而且来请求之后再创建进程也太慢了, 因此, 很明显, 下一版本我们要使用多线程了. 
 
@@ -4211,7 +4211,7 @@ int daemon(int nochdir, int noclose);
 
 在上面的过程中, 我们已经通过TCP搭建起了一个简易的网络服务平台, 但上面的平台实际上仍旧存在一些问题: 我们知道, `TCP`是一个传输层的全双工协议, 无论是客户端还是服务端, `TCP`都维护着它们各自的发送缓冲区和接收缓冲区. 因为传送和接收根本不是一个缓冲区, 所以自然可以同时读和写.
 
-![image-20250325115011450](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250325115011622.png)
+![image-20250325115011450](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250325115011622.png)
 
 当服务端与大量客户端进行通信时, 就会产生这种问题:    服务端的协议层缓冲区同时存在多个报文, 并且这些报文可能并不是完整的. 报文不完整那自然无法正常进行通信, 所以我们下面就要在应用层解决这个问题. 
 
@@ -4247,7 +4247,7 @@ void operator()()
 
 现在我们回到这张图上
 
-![  ](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250325115011622.png)
+![  ](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250325115011622.png)
 
 `TCP`是传输控制协议, 它为了保证可靠性(`TCP`也在内核里面, 是系统的一部分), 具有高自主性, 诸如报文什么时候发, 发多少, 出错了怎么办之类的问题都由`TCP`自己决定,    现在假设我们的服务端接收缓冲区已经快满了, 在发送数据之前, 客户端和服务端的`TCP`协议就会进行沟通, 客户端说, "我这里有这么多的数据, 你那里能放的下吗?", 服务端说, "不行, 快满了, 你最多发这么点", 于是客户端就把数据截一半, 先发过去一部分, 剩下的部分等到服务端能收下再发, 然后, 服务端突然又缓过来了, 一口气把接收缓冲区你的数据又读到应用层了, 此时服务端的应用层就面临两个问题, 一是这个缓冲区里面有多个报文, 需要想办法把它们彼此分开, 另一个问题是, 分开之后, 有些报文不完整, 不能立刻解析, 必须要等着剩下的部分传过来再解析. 
 
@@ -4284,7 +4284,7 @@ struct output
 
 在发送的时候, 我们需要把这两个结构体转成字符串, 这样才方便进行网络通信, 对方接收之后, 又要还原出对象, 进行具体分析.    除了结构体本身的关键数据之外, 我们还需要把其它一些附属数据转成字符串, 比如, 拿聊天软件来说, 我们接收的时候, 都会收到诸如消息发送的时间, 谁发送的等附属信息, 这些附属字符串就相当于报头, 与表示计算对象的负载合在一起, 就构成了一份报文. 
 
-![image-20250327154110318](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250327154110423.png)
+![image-20250327154110318](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250327154110423.png)
 
 无论对于任何协议, 它都包括两个部分, 一是协议本身的制定(以结构体的形式约定), 二是围绕协议的序列化和反序列化. 传送过程中, 要需要留意保证报文的完整性.
 
@@ -6303,7 +6303,7 @@ bool unpack(std::string &in, std::string *out)
 
 我们再回到理论, 重新谈谈七层`OSI`的概念模型
 
-![image-20250311143430783](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311143431121.png)
+![image-20250311143430783](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311143431121.png)
 
 在我们上面写的自定义协议中, 像`class tcpserver`这种负责通信管理的, 每次用户发出请求, 开一个线程或者进程的层就是会话层, 新开的执行流实际上就是属于用户的会话, 就像我们登录Linux, Linux为我们创建会话那样.               至于表示层, 它的功能实际上就是把数据转换成各种各样的形式,   上图说的, 设备固有格式到网络标准格式, 实际上就是序列化, 反过来则是反序列化. 所以表示层实际上就是协议负责的内容.        应用层则负责为用户提供具体的服务, 比如我们这里的网络计算功能, 由`class calculator`负责.    应用层, 表示层, 会话层实际上是要根据实际情况进行具体设计的, 所以它们三个写不进系统, 必须要由我们亲自把握. 
 
@@ -6337,7 +6337,7 @@ PS C:\Users\21066>
 
 直接使用"36.152.44.132", 便能访问百度主页面
 
-![image-20250402195649574](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402195649798.png)
+![image-20250402195649574](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250402195649798.png)
 
 不过这个可能因人而异, 有些情况下可能用不了, 不过那并不意味着里面没地址, 而是和各种原因有关, 这里我们就不深究了.
 
@@ -6345,11 +6345,11 @@ PS C:\Users\21066>
 
 不过我们平常用的链接也没这么直白, 往往还有其他内容, 比如我们这边随手点一篇腾讯主页的文章   https://news.qq.com/rain/a/20250402A01QIZ00
 
-![image-20250402202521931](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402202522081.png)
+![image-20250402202521931](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250402202522081.png)
 
 这里面还有些别的内容, 不过这个链接还是不太完整, 
 
-![image-20250402203719616](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402203719671.png)
+![image-20250402203719616](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250402203719671.png)
 
 这个链接被称为URL, 即统一资源定位符, 用来标识网络中的一份特定资源.比如, 文章, 音频, 视频... 它们都是网络资源.端口号可以用协议方案名推出来, 一般省略, 至于那个文件路径, 他前面也有一个`/`, 这个`/`被称为web根目录, 通常就是Linux的根目录, 但也有特殊情况, 我们之后会谈. 至于查询字符串, 是用于推送这种网络行为的, 网络行为总体上就两种, 一种是拉取, 就是把网上东西拿到本地, 除此之外就是推送, 就是把本地东西放网上, 当你推送时, 就需要用到查询字符串, 它实际上是一个kv结构的集合字符串, 最后的那个片段标识符不参与网络行为, 它的作用是定位页面中的某个特定位置, 让页面最开始位于这个位置. 
 
@@ -6365,7 +6365,7 @@ http://36.152.44.132/s?ie=utf-8&f=8&rsv_bp=1&rsv_idx=1&tn=baidu&wd=hello%20world
 
 HTTP的请求由多行构成, 其中的每一行都以`\r\n`为结尾(为字段分隔符), 第一行被叫做请求行, 下面的若干行被称为请求报头, 其中有许多kv形式的pair, 用于描述该请求的描述信息, 末尾是用户上传内容(正文), 这个不一定以`\r\n`为行结尾, 完全取决于用户到底传的是什么. 
 
-![image-20250402214135572](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250402214135688.png)
+![image-20250402214135572](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250402214135688.png)
 
 对于请求行来说, 它有三个成员, 成员之间以空格分割, 第一个成员描述了该请求的方法, 方法很多, 但我们几乎只用其中两种, 负责拉取的GET, 和负责拉取的POST, 接下来是URL, 这个URL一般是域名后面的URL,  然后就是协议版本. 比如HTTP/1.0,  HTTP/2.0
 
@@ -6377,7 +6377,7 @@ HTTP的请求由多行构成, 其中的每一行都以`\r\n`为结尾(为字段�
 
 HTTP的响应格式与请求格式大致相同, 由多行构成, 每行以`\r\n`结尾, 第一行被称为"状态行", 后面的若干行为响应报头, 其内容认识kv结构构成的集合, 其中也包含对于正文字节长度的描述, 报头之后是个空行, 之后便是正文, 正文的形式任由实际情况决定.
 
-![image-20250403135059541](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403135059601.png)
+![image-20250403135059541](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250403135059601.png)
 
 接下来我们用`telnet`抓一份响应报文
 
@@ -6436,15 +6436,15 @@ HTTP/1.1 200 OK
 
 下面我们借助于`fiddler`看看HTTP的请求报文, `fiddler`是个抓包软件, 本来我们的请求是直接发到服务端那里, 但`fiddler`启动后, 就会拦截我们的请求报文, 然后再次包装, 再发给服务端, 服务端的请求, 也先到`fiddler`这里, 然后再由`fiddler`转交给需要的进程.
 
-![image-20250403142909006](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403142909137.png)
+![image-20250403142909006](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250403142909137.png)
 
-![image-20250403142929312](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403142929375.png)
+![image-20250403142929312](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250403142929375.png)
 
 不过这实际是HTTPS, 所以用的是443端口, 其内容是被加密的, 所以看不到具体内容.
 
 我们再换一个软件, `Postman`, `fiddler`相当于是代理, `Postman`是自己构建一个请求发给服务端, 它自己就相当于是浏览器. 
 
-![image-20250403143901834](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403143902028.png)
+![image-20250403143901834](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250403143902028.png)
 
 上面是请求, 下面是响应, 不过它给我们的不是原始请求报文, 而是已经被分割好的, 但对于初学者来说, 我们需要看到原始报文, 所以这点不太好. 下面的是响应, 给了我们正文和渲染效果. 
 
@@ -6521,7 +6521,7 @@ class HttpServer
 
 这次我们直接用浏览器访问
 
-![image-20250403162001278](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250403162001419.png)
+![image-20250403162001278](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250403162001419.png)
 
 ```shell
 [wind@starry-sky HTTP]$ ./HttpServer
@@ -6599,11 +6599,11 @@ Upgrade-Insecure-Requests: 1
 
 二是, 服务端依据用户的平台, 进行个性化推荐, 比如, 我们在Windows的百度搜索"微信", 它知道我这是Windows, 所以会为我推荐Windows
 
-![image-20250404162535864](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404162535939.png)
+![image-20250404162535864](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404162535939.png)
 
 而我们在Android端的百度搜索"微信", 它弹出的就是Android版的.
 
-![0806e7bad23a1673e070207f0cf26ed9](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404162649163.jpg)
+![0806e7bad23a1673e070207f0cf26ed9](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404162649163.jpg)
 
 我还是没有苹果, 所以就不看了.
 
@@ -6638,7 +6638,7 @@ static void* threadRun(void* args_)
 }
 ```
 
-![image-20250404165144058](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404165144143.png)
+![image-20250404165144058](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404165144143.png)
 
 尽管这个"hello world"其貌不扬, 但是我们的第一步.
 
@@ -6660,7 +6660,7 @@ hello worldConnection closed by foreign host.
 
 下面, 我们把正文改一改, 不要只有一个字符串, 太空洞了, 不过我们目前的本职是后端, 正文是前端写的, 所以后面我们的正文主要借助于AI或者网络资源. 我们可以搜索`w3schools`这个网站, 它是一个非常知名的在线学习网站，主要专注于 **网页开发技术** 的教学。它特别适合初学者和中级开发者，尤其是像我们这样的后端开发者，想快速上手一些前端知识时，W3Schools 是个不错的资源。不过它是挪威的网站, 不过我们也有[中文的](https://www.w3school.com.cn/)
 
-![image-20250404170653886](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404170653990.png)
+![image-20250404170653886](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404170653990.png)
 
 网页是用`HTML`写的.  它实质是文本, 浏览器收到之后, 会依据它里面的描述进行渲染, 然后就有了我们见到的那些页面.
 
@@ -6776,7 +6776,7 @@ static void* threadRun(void* args_)
 }
 ```
 
-![image-20250404172828508](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404172828591.png)
+![image-20250404172828508](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404172828591.png)
 
 我们打开开发者模式, 就可以看到收到的`html`了, 前端就是写`html`, 我们后端是把`html`发过去, 并负责后端逻辑的, 所以一个前端一般对应3至5个后端
 
@@ -6819,7 +6819,7 @@ Referer: http://120.55.90.240:8888/a/b/c/d.html
 
 我们主要看第一份报文, 第二份报文在请求网站图标, 就是这种东西
 
-![image-20250404173957338](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404173957382.png)
+![image-20250404173957338](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404173957382.png)
 
 所以如果我们想有图标, 那就在`Web`根目录下放个`favicon.ico`
 
@@ -6827,7 +6827,7 @@ Referer: http://120.55.90.240:8888/a/b/c/d.html
 
 我们可以再给`URL`加点东西
 
-![image-20250404174655481](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404174655530.png)
+![image-20250404174655481](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404174655530.png)
 
 服务端也可以收到对应的信息
 
@@ -6855,7 +6855,7 @@ Referer: http://120.55.90.240:8888/a/b/c/d.html?username=wind&passwd=123
 
 比如, 我们在项目路径下加个`wwwroot`文件夹, 作为我们的`Web`根目录,
 
-![image-20250404180003029](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404180003591.png)
+![image-20250404180003029](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404180003591.png)
 
 将来我们的所有网络资源, 页面, 音频, 图片, 都会放在这里, 之后你把用户发来的路径拼到`wwwroot`路径下就行了
 
@@ -6924,7 +6924,7 @@ static void* threadRun(void* args_)
 
 此时, 再进行访问就能看到相应的效果
 
-![image-20250404194653937](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250404194654086.png)
+![image-20250404194653937](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250404194654086.png)
 
 不过我们这里, 路径目前是写死的, 将来我们会对用户发来的路径解析, 拼接成一个合法的路径. 下面, 我们就写个函数解析一下收到的请求报文, 并把用户给的路径拿出来. 我们要把用户给的路径拼接成`wwwroot/xxx/xxxx/xxx`的形式, 另外, 还需要说一句, 对于`Web`根目录, `/`, 如果用户给的是这个路径, 那就给它展示首页. 
 
@@ -7157,7 +7157,7 @@ static void* threadRun(void* args_)
 
 这效果确实挺好
 
-![image-20250405170917990](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405170918094.png)
+![image-20250405170917990](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405170918094.png)
 
 另外, 我们看到, 它默认请求`Web`根目录路径, 但一般来说, 对于这种直接请求根目录的行为, 我们一般是把首页发过来, 而不是把根目录下的所有东西发过去. 
 
@@ -7273,9 +7273,9 @@ private:
 
 我们看到, 效果还是非常好的
 
-![image-20250405172911668](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405172911757.png)
+![image-20250405172911668](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405172911757.png)
 
-![image-20250405173147904](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405173148007.png)
+![image-20250405173147904](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405173148007.png)
 
 在这之后, 我们就可以根据用户的请求动态调整页面了, 而不是像以前那样写死.
 
@@ -7471,29 +7471,29 @@ static void *threadRun(void *args_)
 
 下面我们说一下`html`中的一些知识, 一般来说, 页面里或多或少都有几个跳转按钮, 点了之后, 就能跳转到相应的页面, 比如我们的`cosmic_404.html`就有一个跳转, 可以返回我们的首页
 
-![image-20250405184145074](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405184145188.png)
+![image-20250405184145074](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405184145188.png)
 
 页面跳转的`html`标签是这样的`<a href="/" class="home-btn">返回安全地带</a>`
 
 `href`后面的就是要调跳转到的页面地址, 如果你什么都没有, 只有路径, 那么, 它就会默认继续使用当前的`IP`端口, 如果你写了`https://www.baidu.com/`, 那就会跳到百度首页.
 
-![image-20250405184915795](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405184915961.png)
+![image-20250405184915795](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405184915961.png)
 
 ### HTTP的方法
 
 HTTP有如下方法:
 
-![image-20250405203314795](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405203314978.png)
+![image-20250405203314795](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405203314978.png)
 
 不过我们一般只能看到`GET`和`POST`, `GET`就是获得服务器上的资源, `POST`也有类似于`GET`的功能, 不过它更多的是把本地资源传到服务器上, `PUT`正如这张图所说, 传输文件, `HEAD`的意思就是我不要正文, 你服务器只要发响应行和响应报头就行了, `DELETE`是删除文件, 但由于存在明显的安全问题, 所以一般来说, 都会被关掉, `OPTIONS`询问服务器支持那些方法, 会以正文的形式返回到客户端, `CONNECT`我们在`fiddler`那里见过, 是连接代理的, 其它的就不说了.
 
 我们这里只稍微说说`GET`和`	POST`. 我们上面说过, `POST`是向服务器提交数据, 那我们平时都是怎么提交数据的呢? 答案是表单, 什么是表单, 表单是前端的概念, 像什么搜索框, 
 
-![image-20250405204337434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405204337592.png)
+![image-20250405204337434](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405204337592.png)
 
 登录框(就这样叫吧)
 
-![image-20250405204443586](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405204443767.png)
+![image-20250405204443586](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405204443767.png)
 
 还有其他类似的东西
 
@@ -7524,15 +7524,15 @@ HTTP有如下方法:
 
 `/login`一般是某个程序, 服务端可能会以`fork`和进程替换的方式把用户的输入内容输到这个程序里, 程序给服务段处理结果, 服务端再把结果交给用户什么的.
 
-![image-20250405214104298](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250405214104426.png)
+![image-20250405214104298](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250405214104426.png)
 
 我这里说表单, 其真正目的是为了展示`GET`和`POST`的不同, 现在我们是`POST`方法, 提交一下, 看看服务器打印的报文
 
-![image-20250406154203310](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250406154203428.png)
+![image-20250406154203310](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250406154203428.png)
 
 我们看到. 它这个`k-v`值是放在正文里面的, 如果我把表单的方法改成`"GET"`又会怎样呢?
 
-![image-20250406154600019](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250406154600116.png)
+![image-20250406154600019](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250406154600116.png)
 
 此时我们就可以看到, 已经没有`Content-Length`字段了, 也就是没有正文了, `k-v`是以搜索字符串的形式被拼到`url`上的.
 
@@ -7542,7 +7542,7 @@ HTTP有如下方法:
 
 状态码, 位于相应行的第二列, 用来表示响应的状态
 
-![image-20250407164854306](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407164854416.png)
+![image-20250407164854306](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250407164854416.png)
 
 `1`开头的比较少见, 它一般用在这种场景下: 用户的请求需要处理一段时间, 为了让页面有反应, 先发一个等待页面, 向用户表示, 请求已经接收到了, 现在正在处理.   以`2`为开头的表示请求正常处理, 在上面的代码中, 我们就把状态码写死成了`200`,即使是`404`界面, 用的仍然是`200`, 这并不规范, 所以等会儿我们会改, `4`开头的, 表示客户端发出了逻辑上不应该发出的请求, 比如, 请求服务端没有的资源, 也就是`404`,还有一个是`403`, 表示用户没有足够的权限获得资源 `5`开头的, 表示服务端本身出问题了, 可能是线程, 进程创建失败了, 无法给用户开一个新会话, 从而无法处理请求, 或者 什么数据库坏了, 查不了数据之类的, `3`开头的等会儿我们再说, 状态码我们不需要记, 只要了解就行了.
 
@@ -7608,7 +7608,7 @@ static void *threadRun(void *args_)
 
 测试一下, 就会发现服务端确实发回了一份`404`状态码的报文
 
-![image-20250407172459275](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407172459401.png)
+![image-20250407172459275](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250407172459401.png)
 
 `404`并不是说页面不响应, 还是要有反应的, 告知用户请求的资源是不存在的.
 
@@ -7667,7 +7667,7 @@ static void *threadRun(void *args_)
 
 另外我们也可以看到, 有这个字段的话, 浏览器就会忽略初始服务器的正文内容
 
-![image-20250407180228833](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407180228987.png)
+![image-20250407180228833](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250407180228987.png)
 
 重定向又可以被细分为"临时重定向"和"永久重定向两种", 拿生活中的例子, 你喜欢去一家饭馆, 有一天, 你去饭馆, 发现门上贴条告示, "本店正在升级装修, 已临时移到某某地方",这就是临时重定向, 于是你就去那个"某某地方了", 饭馆在新位置吸引到了一些新客户, 有一天, 原位置装修好了, 要搬回去, 但怕那些新客户找不到店面, 于是在门上说, "本店原址已经装修完毕, 现在迁回去了, 原址在哪里哪里", 于是那些新用户就知道, 以后就再也不用来这个地方了, 这就是"永久重定向"
 
@@ -7713,7 +7713,7 @@ static void *threadRun(void *args_)
 
 我们用浏览器重新登录一下, 会发现, 没有照片, 但根据服务端的打印来看, 照片应该发出去了
 
-![image-20250407214502872](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250407214503208.png)
+![image-20250407214502872](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250407214503208.png)
 
 只不过因为照片是二进制文件, 所以都是乱码.
 
@@ -7752,7 +7752,7 @@ std::string readHtml(const std::string& resource_path)
 
 改了之后我们发现加载出来了
 
-![image-20250408130800341](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408130800494.png)
+![image-20250408130800341](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408130800494.png)
 
 但其实上, 这是侥幸, 文件有很多种, 有文本, 有图片, 有视频, 音频, 浏览器怎么知道正文里的究竟是什么文件, 而且, 即使单对照片来说, 还有`.jpg, .png....`等形式, 浏览器它不一定能仅靠正文内容分析出来文件的具体种类和具体格式, 为此, 我们需要在响应报头里再加一个字段, 那就是`Content-Type`字段, 你问这里为什么,能加载出来? 我只能说, 可能是Chrome很强大, 它单靠正文自己分析出了正确的格式,不过我们该加还是要加的, 以下是`Content-Type`对照表
 
@@ -7860,11 +7860,11 @@ static void *threadRun(void *args_)
 }
 ```
 
-![image-20250408135156130](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135156238.png)
+![image-20250408135156130](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408135156238.png)
 
-![image-20250408135233157](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135233241.png)
+![image-20250408135233157](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408135233241.png)
 
-![image-20250408135332506](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408135332633.png)
+![image-20250408135332506](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408135332633.png)
 
 另外说一下, 在`readHtml`那里, 可能会有人这样这样写
 
@@ -7891,15 +7891,15 @@ std::string readHtml(const std::string& resource_path)
 
 这里我们打开`Edge`浏览器, 不用`Chrome`的原因是因为`Chrome`会把`Cookie`内容封装起来, 所以我们看不到实际内容, `Edge`是可以直接看到的.
 
-![image-20250408154729131](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154729804.png)
+![image-20250408154729131](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408154729804.png)
 
-![image-20250408154809982](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154810688.png)
+![image-20250408154809982](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408154810688.png)
 
-![image-20250408154840620](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154841220.png)
+![image-20250408154840620](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408154841220.png)
 
-![image-20250408154912740](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154913422.png)
+![image-20250408154912740](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408154913422.png)
 
-![image-20250408154934249](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408154934879.png)
+![image-20250408154934249](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408154934879.png)
 
 接下来我们硬编码, 给响应报文都加个`Set-Cookie`
 
@@ -7952,11 +7952,11 @@ static void *threadRun(void *args_)
 
 我们再次访问, 就能看到我们的Cookie了
 
-![image-20250408160144997](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408160145283.png)
+![image-20250408160144997](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408160145283.png)
 
 另外, 在后来访问的时候, 浏览器就自动把`Cookie`带上了
 
-![image-20250408161741599](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250408161741811.png)
+![image-20250408161741599](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250408161741811.png)
 
 我们上面的`Set-Cookie`字段写的稍有问题, 在响应报文中, 每个`Set-Cookie`都只是一个`k-v`结构, 所以如果要传送多个`k-v`, 需要用到多个`Set-Cookie`, 而不是多个`k-v`用`&&`连起来, 挤到一个`Set-Cookie`里, 下面我们改一下
 
@@ -8008,7 +8008,7 @@ static void *threadRun(void *args_)
     return nullptr;
 ```
 
-![image-20250409153807296](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409153807415.png)
+![image-20250409153807296](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409153807415.png)
 
 在上面我们写的`Cookie`里面就是用户的账号密码, 相当于通过账号密码直接对用户进行身份验证, 但实际上, 现在已经没有人会这样做了, 因为很明显, 这种`Cookie`很容易造成信息安全问题. 
 
@@ -8032,7 +8032,7 @@ static void *threadRun(void *args_)
 
 比如, 我们可以使用按位异或模拟一次简单的加密解密过程, 
 
-![image-20250409175056435](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409175056520.png)
+![image-20250409175056435](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409175056520.png)
 
 当然我们实际用的肯定不是这么简单的, 实际上, 对于加密解密这件事,  计算机还没出来的时候人们就有需求了, 如今, 只不过是需求延伸到计算机里面, 对于加密解密, 早就有了对应的学派, 密码学, 这个学派里面都是数学神仙, 我们下面不会谈数学原理, 而只是从工程学角度略微说说.
 
@@ -8062,7 +8062,7 @@ HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们�
 
 **方案一: 只使用对称加密**
 
-![image-20250409195346720](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409195346812.png)
+![image-20250409195346720](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409195346812.png)
 
 在这种情况下, 客户端和服务端通过某种方式共同维护着同一份密钥, 无论是请求还是响应, 都会先被密钥加密, 所以中间人无法获知其中的内容.
 
@@ -8074,7 +8074,7 @@ HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们�
 
 既然仅靠对称加密握不了手, 那么我们就用非对称加密试试
 
-![image-20250409202416156](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409202416232.png)
+![image-20250409202416156](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409202416232.png)
 
 服务端预先生成一对公钥私钥, 等待客户端连接, 最开始, 用的当然是HTTP协议, 但HTTP不安全, 所以客户端请求使用HTTPS, 服务端收到之后, 就会把公钥以正文形式交付给客户端, 在这之后, 就进入了HTTPS, 客户端的请求先借助于公钥变为密文, 然后传输到服务端, 服务端通过私钥还原为明文, 并把请求报文使用私钥加密, 交付给客户端, 客户端使用公钥解密, 转为明文.    
 
@@ -8084,7 +8084,7 @@ HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们�
 
 在这种方案下, 在正式通信前, 服务端和客户端都各自生成一对公钥私钥, 握手时交换彼此的公钥私钥
 
-![image-20250409210122724](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409210122798.png)
+![image-20250409210122724](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409210122798.png)
 
 在握手成功之后, 客户端再发请求, 先要用服务端的公钥进行加密, 此时密文只能由服务端的私钥解密, 服务端发响应, 先用客户端的公钥进行加密, 此时密文只能由客户端的私钥解密, 这样就构成了安全信道
 
@@ -8094,7 +8094,7 @@ HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们�
 
 **方案四: 握手使用非对称, 正常通信使用对称**
 
-![image-20250409213012966](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409213013040.png)
+![image-20250409213012966](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409213013040.png)
 
 服务端生成公钥和私钥, 将公钥发给客户端, 客户端本地创建一个对称密钥, 并使用公钥加密, 发给服务端, 服务端使用密钥解密, 获取对称密钥.
 
@@ -8102,7 +8102,7 @@ HTTPS的加密解密是怎么进行的呢? 由于空说太干巴, 所以我们�
 
 现在我们已经解决了效率问题, 现在我们要看之前方案都存在的致命问题
 
-![image-20250409214150885](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250409214150960.png)
+![image-20250409214150885](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250409214150960.png)
 
 在客户端明文发出请求协议升级时, 黑客就意识到了对应的服务端马上会分发公钥, 他自己生成一对公钥私钥, 等到服务端把包含公钥的报文发过来时, 对报文进行分析, 把其中的公钥换成黑客自己的公钥, 客户端使用黑客的公钥对本地生成的对称密钥进行加密, 黑客使用自己的私钥解密, 获取对称密钥, 黑客使用之前拦截下来的公钥对解密后的报文进行再加密, 发给服务端, 服务端拿到密文, 使用私钥解密, 获得对称密钥.
 
@@ -8120,7 +8120,7 @@ CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织�
 
 这里有一张图, 我们先大致看看, 后面会说细节的:
 
-![image-20250410211816814](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410211817032.png)
+![image-20250410211816814](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250410211817032.png)
 
 然后我们看看这个证书里面大致有什么内容, 签名我们先略过, 签发机构就是这个证书是谁颁发的, 比如我们身份证上面也有签发机构, 有效时间表明了证书的有效时间(好像是废话), 就像身份证不是永久的, 证书也不是永久的, 只有一段的时间期限, 过期了, 浏览器就会说, 证书过期了, 不安全, 扩展信息和技术没有太大关系, 我们略过, 域名就是网站的域名是什么, 申请者描述了谁申请了这份证书, 公钥就是服务端在申请证书前生成的那份公钥, 就是`.csr`里面的那份公钥, 就是提交给CA机构的那份公钥, 就是服务端与客户端进行cs通信时, 从HTTP转为HTTPS的那份公钥, 等会儿还有个公钥, 注意不要弄混了.   注意, 服务端生成的那份私钥一直都被自己保管着, 并没有交给任何人, 并没有外泄, CA机构也不知道服务端的私钥.
 
@@ -8130,7 +8130,7 @@ CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织�
 
 这里就有一个[在线生成csr文件的网站](https://myssl.com/csr_create.html)
 
-![image-20250410214144262](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410214144339.png)
+![image-20250410214144262](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250410214144339.png)
 
 把信息填好之后, 点击"生成", 网站就会自己生成一份私钥, 公钥, 然后把这份刚刚生成的公钥加到`csr`文件中, 并向你返回私钥和`csr`文件. 所以这个在线网站是可以知道私钥信息的, 因此要选择具有安全认证的在线网站.
 
@@ -8138,7 +8138,7 @@ CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织�
 
 之后, 我们先了解一下什么是签名, 也就是证书里面的签名大概是什么生成的., 注意, 这下面也有一对公钥私钥, 这个公钥私钥可不是服务端的公钥私钥, 而是CA机构的公钥私钥, 千万不要混了.
 
-![image-20250410215440960](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250410215441052.png)
+![image-20250410215440960](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250410215441052.png)
 
 首先我们有一份原始数据, 对于CA证书来说, 这份原始数据就是把CA证书的签名字段去除后剩下的原文内容, 然后使用哈希算法, 为这份原始数据生成一份数据摘要, 我们前面说过数据摘要, 我们说, 它可以用来验证原始文件是否遭到了修改., 之后CA机构用自己的密钥把这份数据摘要进行了加密处理, 所生成的这份密文就是签名, 随后把这份签名附加到原始文件上, 这样就得到了一份证书.  
 
@@ -8154,7 +8154,7 @@ CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织�
 
 对于一些关键网站, 浏览器可能会自备证书, 此时第一次连接时客户端可以直接发加密的对称密钥, 服务端直接解密就行, 不用再让服务端再发证书. 
 
-![image-20250411143707730](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411143707943.png)
+![image-20250411143707730](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411143707943.png)
 
 最后我们总结一下，HTTPS 工作过程中实际会涉及三组密钥，它们的来源和作用各不相同：
 
@@ -8188,23 +8188,23 @@ CA机构是一种权威性的机构, 它们能够给个人, 公司或者组织�
 
 我们知道, 端口号标识了一个主机上进行通信的不同的应用程序.
 
-![image-20250411150906863](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411150906992.png)
+![image-20250411150906863](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411150906992.png)
 
 在TCP/IP协议中, 用 "源IP", "源端口号", "目的IP", "目的端口号", "协议号" 这样一个五元组来标识一个通信(可以通过netstat -n查看);  
 
-![image-20250411151013751](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151013947.png)
+![image-20250411151013751](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411151013947.png)
 
 上图描述了一个网络服务的场景, 图中服务端以多执行流的状态建立与多个用户的会话, 客户端B只有一个页面, 所以只有一个会话, 客户端A有两个页面, 所以有两个会话, 并且这两个页面的端口号并不相同, 这样服务端才能对这两个页面进行区分.
 
 多个画面, 实际上就是用户机器有多个页面访问服务端
 
-![image-20250411151444249](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411151444388.png)
+![image-20250411151444249](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411151444388.png)
 
 端口号是16位的, 也就是`0-65535`, 其中`0-1023`被称为"知名端口号", HTTP(80), FTP(21), SSH(22)等这些广为使用的应用层协议, 他们的端口号都是固定的.  另外的, 也就是`1024-65535  `, 是操作系统动态分配的端口号. 客户端程序的端口号, 就是由操作系统从这个范围分配的.  不过也有些服务不在知名端口号, 比如MySQL(3306)
 
 系统里也有对应的配置文件, 记录了知名服务对应的固定端口号, 我们可以执行`vim /etc/services`查看它们
 
-![image-20250411152930361](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411152931028.png)
+![image-20250411152930361](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411152931028.png)
 
 对于这些知名服务的端口, 除非正式服务, 否则不要用. 
 
@@ -8585,7 +8585,7 @@ vda               5.53         6.72        58.71         0.00    1135185    9917
 
 我们先看看UDP的报文是什么样的
 
-![image-20250411163844645](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411163844778.png)
+![image-20250411163844645](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411163844778.png)
 
 UDP怎么分离报头和负载的呢? 其实很简单, 它采用的是定长模式, UDP报文前八字节就是它的报头, 剩下的就是负载, 怎么交给更上层呢? 在报头中, 我们可以看到有一个"目的端口号", 通过这个"目的端口号"就能找到与之绑定的`socket`文件, 就能把收到的负载写进去, 进程再通过`socket`获取负载.
 
@@ -8631,7 +8631,7 @@ struct sk_buff
 
 然后我们可以从内存找一片空间作为UDP报文存放的场所
 
-![image-20250411181213150](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411181213329.png)
+![image-20250411181213150](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411181213329.png)
 
 丢弃报文的对应动作就是把`struct sk_buff*`给释放.
 
@@ -8643,7 +8643,7 @@ TCP全称为 "传输控制协议(Transmission Control Protocol"). 人如其名, 
 
 我们可以画一根线, 线上代表的应用层, 我们可以在上面写些服务, 比如之前我们自定义协议写的网络计算器, 线下面我们就只看传输层, 虽然我们说TCP有可靠性, 所以用`write, send`, 可以认为字节流就进网络了, 但实际上, 并不是这样, `read, recv, write, send`它们的实际作用只是把用户缓冲区的内容拷到TCP的发送缓冲区, 或者把TCP接收缓冲区的内容拷贝到应用层的接收缓冲区, 比如我们之前定的`buffer`, `string`什么东西的, 应用层的报文, (一般叫做请求或者响应), 只是来到了TCP的发送缓冲区, 至于它什么时候发送, 发送多少, 怎么发送, 出错了怎么办? 这些都不用我们用户操心, 而是由TCP自己控制, 而且, 服务端和客户端用的都是TCP, 大家都是对等的, 对于另一台机器来说, 也是这样
 
-![image-20250412220403590](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250412220403714.png)
+![image-20250412220403590](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250412220403714.png)
 
 另外, 我们其实也能感受到, 类似的话我们在文件里似乎也说过.   我们说每个文件都有自己的缓冲区, 我们使用`read, write`, 只是把数据从用户层缓冲区移到了内核层缓冲区, 至于内核层缓冲区中的数据, 什么时候写到文件里, 怎么写到文件里, 和磁盘怎么协商 都由系统自己决定, 用户不用关心, 今天我们学习网络, 就相当于把磁盘换成网卡, 这里再说一下, TCP的缓冲区实际上用的就是socket文件的缓冲区.
 
@@ -8659,7 +8659,7 @@ TCP全称为 "传输控制协议(Transmission Control Protocol"). 人如其名, 
 
 下面, 我们看看TCP协议的段格式
 
-![image-20250413155330367](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250413155330455.png)
+![image-20250413155330367](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250413155330455.png)
 
 我们在应用层, 一般喜欢把报文叫做"请求, 响应", 而在传输层, 我们一般把报文叫做"报文段", 所以上面说是"段格式",  "IP"层一般叫做"数据报", 链路就是"数据帧"了, 这在之前的过程中, 我们也说过. 
 
@@ -8709,9 +8709,9 @@ TCP还有一个确保可靠性的机制, 叫做"确认应答".
 
 这里要注意, 我并没有说"B"到"A"方向可靠性一直得不到保证, 而只是说, 单论  "A"收到"B"的确认应答这个场景下, "B"到"A"的方向可靠性得不到保证,但"A""B"两台机器是一直在互动的, 当"B"向"A"发送有实质内容的信息时, 确认应答就能保证"B"到"A"方向的可靠性, 但保证不了"A"到"B"方向的可靠性
 
-![image-20250414130245703](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414130245802.png)
+![image-20250414130245703](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414130245802.png)
 
-![image-20250414130653706](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414130653791.png)
+![image-20250414130653706](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414130653791.png)
 
 尽管就单个场景来说, 无法确保两个方向上的可靠性, 但多个场景合起来, 就能确保两个方向上的确认应答.    也就是说, 局部上只能保证一个方向上的可靠性, 但整体上两个方向上的可靠性都能保证.
 
@@ -8732,7 +8732,7 @@ A: "收到"
 
 另外, 我们上面的这种通信, 是串行的, 收到确认应答再发下一个数据, 这样效率就会非常低下. 所以在实际通信中, 我们用的方案都是并行通信, 本端同时发送多次消息, 这样, 在理论上, 对端也要发送多个确认应答.
 
-![image-20250414133837551](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414133837641.png)
+![image-20250414133837551](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414133837641.png)
 
 不过, 这样就引发了一个问题, 尽管上图中的四个报文段, 我们依据发送时的顺序编号为"a,b,c,d",   但对面收到的顺序可不一定是"a,b,c,d", 因为网络状况是在时刻发生变化的, 所以可能恰好"a"发的时候最短的那个路由走不过去, 所以它选择了一个更长的路由, 别的报文则走了最短的那个路由.  在UDP里面, 我们也说过这种现象叫做 "乱序", "乱序"是不可靠的表现, 所以TCP也需要通过一些机制, 把乱序给修正回来.如果不修正, 应用层收到的就是无法被解析的数据
 
@@ -8740,13 +8740,13 @@ A: "收到"
 
 我们之前说过, TCP缓冲区它是一格一格的, 或者我们可以认为, 它就是一个`char`类型的大数组, 里面的数据, 由于是直接从应用层缓冲区里面拷过来的, 所以都是符合应用层顺序要求的, 并且, 由于由于这是一个字符数组, 所以其中的每个字符都有与之对应的数组下标, 当我们要把其中的数据作为TCP报文负载发出去的时候, 就把负载中最后一个字符的数组下标作为"32位序号". 
 
-![image-20250414141259396](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414141259496.png)
+![image-20250414141259396](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414141259496.png)
 
 当对面收到数据之后, 就可以依据序号把数据填到缓冲区里, 从而在不经意间完成顺序的修正.
 
 另外, 那个"确认序号", 顾名思义就是表示确认应答和之前发送的报文之间的对应关系的, 它在数值上, 是与之相对报文的"确认序号"再加上一, 比如, 上面的那张图, 如果报文的序号是"1000, 2000, 3000, 4000", 那么与之对应的确认应答就是"1001, 2001, 3001, 4001"
 
-![image-20250414142801886](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414142801962.png)
+![image-20250414142801886](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414142801962.png)
 
 "确认序号"除了上面表示数据与确认应答映射关系的意思外, 还有一种意思, 那就是表示"确认序号之前的数据,  我已经全部收到了!", 比如, 对与上图中, 其实可以只发"4001"这一个确认应答. 由于因为"1000, 2000, 3000, 4000"都在"4001"前面, 所以只靠这一个确认应答, 我就可以知道之前发的数据对面都收到了, 还有一种意思是, 下次发送请从确认序号开始进行发送, 比如我这里收到了"4001"确认应答, 那就意味着, 下一次数据从"4001"这个位置开始,  上面这张图的序号是乱填的, 不要在意具体数值.
 
@@ -8756,7 +8756,7 @@ A: "收到"
 
 接下来我们去看协议段格式里面的六个标记位, 就是这部分
 
-![image-20250414153616891](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250414153617019.png)
+![image-20250414153616891](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250414153617019.png)
 
 这些标记位是干什么的呢? 实际上就是帮助TCP协议实现多态调用, TCP协议是用C写的, 但这并不意味着C里面没有面向对象, 继承多态的概念, 实际上, 对于系统来说, 用C实现的面向对象, 继承多态非常常见, . 只是方式不同于 C++ 或 Java 语言，而是通过结构体、函数指针、状态机等方式间接实现。
 
@@ -8774,7 +8774,7 @@ A: "收到"
 
 下面我们粗谈一下三次握手
 
-![image-20250415160118777](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250415160118993.png)
+![image-20250415160118777](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250415160118993.png)
 
 当客户端应用层调用`connect`时, 会给服务器发送一份SYN被标记了的报文段, 当然, 这份报文段也描述了客户端的原始缓冲区大小和序号, 相当于在进行协商了,  
 
@@ -8804,11 +8804,11 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 在三次握手成功之后, server和client就开始进行正常通信, 用户层通过调用`recv, read, write, send`等系统接口, 让数据在应用层缓冲区和传输层缓冲区进行流通. 
 
-![image-20250416160853383](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250416160853455.png)
+![image-20250416160853383](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250416160853455.png)
 
 之后是四次挥手
 
-![image-20250416161723593](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250416161723669.png)
+![image-20250416161723593](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250416161723669.png)
 
 接下来我们探讨一下为什么要进行三次握手.
 
@@ -8836,19 +8836,19 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 这次我们的重点是传输层, 所以要把代码改一下, 客户端不进行改动, 服务端改了两个地方, 首先是默认连接队列的大小, 由以前的`5`, 改成了`1`, 另外, 我们先不`accept`, 所以`accept_connection`最前面加了死循环, 还有为方便观察, 守护进程也去除了, 日志改回了屏幕输出模式
 
-![image-20250417200350587](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417200350721.png)
+![image-20250417200350587](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417200350721.png)
 
-![image-20250417200417196](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417200417357.png)
+![image-20250417200417196](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417200417357.png)
 
-![image-20250417201101539](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417201101710.png)
+![image-20250417201101539](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417201101710.png)
 
 先只启动服务端可以看到, 监听套接字已经进入了监听状态
 
-![image-20250417211821654](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417211821786.png)
+![image-20250417211821654](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417211821786.png)
 
 启动客户端我们就能看到相应的网络状态
 
-![image-20250417212059289](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417212059478.png)
+![image-20250417212059289](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417212059478.png)
 
 我们以客户端随机绑定的端口为准, 云服务器的IP地址是经过云服务器厂商虚拟化的, 所以IP不一定能对得上, 我们看到, 服务端和客户端的状态都是`ESTABLISHED`, 也就是两端都认为连接建立成功的, 尽管应用层还没有调用`accept`, 所以我们要得出的重要结论是
 
@@ -8856,21 +8856,21 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 现在我们再启动两个客户端
 
-![image-20250417212216445](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417212216554.png)
+![image-20250417212216445](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417212216554.png)
 
-![image-20250417212340717](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417212340831.png)
+![image-20250417212340717](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417212340831.png)
 
 我们看到, 这次服务端和客户端就连接是否成功产生了分歧, 这是偶然现象, 服务端没有收到最后的那次`ACK`吗?
 
-![image-20250415160118777](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250415160118993.png)
+![image-20250415160118777](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250415160118993.png)
 
 现在我们把第二个客户端关闭
 
-![image-20250417212931497](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417212931632.png)
+![image-20250417212931497](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417212931632.png)
 
 随手画的可能缺些状态, 看这张的挥手状态
 
-![image-20250417213029155](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417213029249.png)
+![image-20250417213029155](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417213029249.png)
 
 由于客户端退出, 所以连接亦被关闭, 向服务端发出了`FIN`. 服务端也做出了回应, 不过由于服务端我们人为地卡住了, 所以它没有调`close`, 所以`51364`在客户端没有进入`TIME_WAIT`, 或者是直接关闭, 服务端则是`CLOSE_WAIT`, 另外我们还可以看到, 之前`SYN_RECV`的那个连接已经不存在了. 
 
@@ -8878,25 +8878,25 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 我们看到`accept`返回的是一个文件描述符, 它的实际作用就是让某个连接与一个内存级的套接字文件建立映射关系, 从而通过把连接转换成内存文件的这种方式 , 把连接的维护转变为对文件的维护, 但如果应用层一直不调用`accept`, 那传输层就需要将这些已经建立成功的连接保存下来, 它把这些连接存到哪里呢? TCP协议会在传输层建立一个全连接队列, 把那些已经建立好的连接放到这个队列中, 此时这个队列中就相当于一份临界资源, TCP协议是生产者, 应用层是消费者, `accept`的作用就是把连接从这个全连接队列中拿出来, 与某个文件进行关联, 这样连接就以文件的形式进行维护, 就不需要TCP在传输层进行维护了.
 
-![image-20250417215342751](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250417215342914.png)
+![image-20250417215342751](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250417215342914.png)
 
 当临界空间满了之后, 即使服务端收到了来自客户端的, 第三次握手的`ACK`, 也会因为全连接队列满了, 而丢弃这个`ACK`, 因此在服务端眼里, 这个连接仍旧是`SYN_RCVD`的.(`SYN_RCVD` 是 TCP 协议标准中的术语, `SYN_RECV` 是 Linux 内核中对这个状态的代码命名方式, 它们是同一个东西)
 
 我们接下来再试一次
 
-![image-20250418125054460](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418125054580.png)
+![image-20250418125054460](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418125054580.png)
 
-![image-20250418125201361](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418125201467.png)
+![image-20250418125201361](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418125201467.png)
 
 稍过一会儿, 我们就可以发现,之前的`45996`在服务端已经消失了, 被释放了.
 
-![image-20250418125514483](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418125514596.png)
+![image-20250418125514483](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418125514596.png)
 
 像`45996`这种, 处于`SYN_RECV`状态的连接被称为"半连接", 与全连接类似, TCP协议也会对半连接进行暂时的存储, 称为"半连接队列", 当一个半连接超过一段时间之后还没有变成全连接, 还是半连接, 那么它就会被系统释放, 所以服务端就没有它了. "半连接队列"的长度和`DEFAULT_BACKLOG`略有关系, 但不多, 主要还是系统自己决定. 
 
 并且我们还可以看到, 现在服务端已经没有这个连接了, 而客户端还认为连接存在, 此时客户端向服务端发送数据, 服务端就会发送`RST`双方进行重连, (也有可能是我们应用层的重连机制起效了, 而不是TCP协议层在重连, 这里不深究了, 深究也很简单, 把客户端改简单点, 不要在应用层启用重连机制)不过因为完全连接队列仍旧是满的, 所以还是无法建立成功, 服务端依旧会显示`SYN_RECV`
 
-![image-20250418133428335](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418133428455.png)
+![image-20250418133428335](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418133428455.png)
 
 在上面的过程中, 我们意识到, 一个连接先会进入半连接队列, 然后再进入全连接队列, 最后才是到达应用层, 这里就有一种分级管理的感觉, 另外我们需要知道的是, 如果应用层因为资源吃紧, 迟迟不把全连接拿上去, 而又有恶意连接占着全连接队列或者半连接队列中的位置, 那其它连接就连半连接队列都进不去, 从而造成丢失, 这个就是TCP三次握手的`SYN`洪水场景. 
 
@@ -8910,33 +8910,33 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 前面我们实验的是三次握手, 下面我们试验一下四次挥手, 首先我们还是要再改一下代码, 把连接拿上去. 也就是取消`accept_connection`的`while(1)`, 并且为了看一下`CLOSE_WAIT`状态, 我们不关闭`class task`里面的`sockfd`
 
-![image-20250418144113128](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418144113676.png)
+![image-20250418144113128](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418144113676.png)
 
 我们先正常连上
 
-![image-20250418144803981](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418144804088.png)
+![image-20250418144803981](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418144804088.png)
 
 然后把客户端断掉, 由于我们手动阻止了服务端的`close`, 所以服务端还没有向客户端发送`FIN`, 所以四次握手没有完整进行, 主动断开的那一方是`FIN_WAIT2`, 被动断开的那一方是`CLOSE_WAIT`
 
-![image-20250418144846156](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418144846262.png)
+![image-20250418144846156](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418144846262.png)
 
 再过一会儿我们发现主动断开的那一方连接已经消失了, 而被动断开的那一方连接仍旧存在, 也就是说被动断开的那一方会把连接存更长的时间
 
-![image-20250418145328114](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418145328227.png)
+![image-20250418145328114](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418145328227.png)
 
 接下来我们主要说说`FIN_WAIT`这个状态, 也就是主动断开的那一方, 在发给对面`FIN`之后, 所进入的状态, 
 
 这次我们让服务端做主动断开的那一方, 为了让服务端主动关闭, 我们把服务内容全部注释, 就留下来一个`close`
 
-![image-20250418152028580](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418152029134.png)
+![image-20250418152028580](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418152029134.png)
 
 在服务端主动关闭之后, 客户端发回了`ACK`, 服务端的连接就变成了`FIN_WAIT2`
 
-![image-20250418153520568](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418153520680.png)
+![image-20250418153520568](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418153520680.png)
 
 接下来我们关闭客户端, 由于客户端被关闭了, 相当于文件被关闭了, 所以客户端这边也会发送`FIN`;  服务端收到之后, 发回`ACK` 状态, 变为`TIME_WAIT`
 
-![image-20250418153545725](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418153545837.png)
+![image-20250418153545725](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418153545837.png)
 
 并且在一二十秒之后, 再次查询, 服务端仍能查到`8444`这个连接, 也就是说, 这个状态下的连接还会保存一段时间, 
 
@@ -8944,17 +8944,17 @@ URG一般是用在什么样的情况呢? 比如, 服务端服务异常, 可能�
 
 这个`TIME_WAIT`和端口地址复用有关, 为了展示效果, 我们先把代码中地址端口复用设置注释掉.
 
-![image-20250418155152236](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418155152810.png)
+![image-20250418155152236](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418155152810.png)
 
 在这之后, 我们再来一次
 
-![image-20250418155322878](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418155322981.png)
+![image-20250418155322878](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418155322981.png)
 
-![image-20250418155343380](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418155343492.png)
+![image-20250418155343380](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418155343492.png)
 
 此时我们把服务端终止, 再启动就会报错
 
-![image-20250418155819688](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418155819806.png)
+![image-20250418155819688](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418155819806.png)
 
 在服务端关闭之后, 尽管应用层已经没了, 但在其之前绑定的端口上仍旧还有连接, 此时重新启动服务端, 由于用的是相同的端口, 所以这个新启动的服务进程就会和之前未被完全关闭的连接冲突, 从而绑定失败.  尽管它是地址在被使用, 但实际上就是纯粹的端口原因, 和IP没有关系.
 
@@ -8974,7 +8974,7 @@ setsockopt(_listeningSockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, size
 
 TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两个`MSL`(最大报文段存在时间)的时间后才能回到`CLOSED`状态 , 也就是完全关闭.   `MSL`就是一份报文段从一段到另一端的最长传送时间,         为什么会有这种机制呢?   这涉及到很多原因,   比如, 主动断开的那一方是在向对方发了`ACK`之后才进入`TIME_WAIT`的, 但这个`ACK`有可能丢包, 此时另一端就会再发`FIN`, 本端为了能够响应重发的这份`FIN`, 那就需要还存在一段时间     
 
-![image-20250418163718978](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418163719093.png)
+![image-20250418163718978](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418163719093.png)
 
 不过即使网络一直不好, `ACK`一直丢包, 被动端也会认为连接异常自动关闭, 但这种关闭不按照正常情况来, 我们能通过让主动端等一会儿的方式正常关闭当然就用正常关闭.
 
@@ -8998,7 +8998,7 @@ TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两�
 
 下面我们稍微说一下流量重传, 接下来就去看TCP的滑动窗口了
 
-![image-20250418175426750](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418175426909.png)
+![image-20250418175426750](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418175426909.png)
 
 这个其实我们曾经也说过, 这里稍微总结一番. 在两台机器最开始握手的时候, 双方会交换彼此的报头, 此时双方其实就已经获知了对方的窗口大小, 甚至在握手阶段, 还可以通过选项协商缓冲区的单位, 默认情况下, 窗口大小是16位, 那就是65535字节(约64KB), 但可以通过选项把把它变大, 选项中有一个名为"窗口扩大因子"(记为`M`)的八位数字, 也就是范围是`0`到`14`, 实际的窗口大小等于窗口大小的字段值再乘上$2^M$ 所以窗口的最大大小是$65535 * 2^{14} = 1073725440字节$, 约为1GB.
 
@@ -9014,11 +9014,11 @@ TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两�
 
 我们曾经了解过TCP最基本的通信方式: 那就是双方使用串行通信模式, 发送方不能连续地发送报文, 必须先发一份, 然后在收到`ACK`应答之后, 再发第二份.
 
-![image-20250418184833339](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418184833452.png)
+![image-20250418184833339](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418184833452.png)
 
 但很明显, 这样的通信方式效率是很低的, 为此, 我们就需要并行的发送模式
 
-![image-20250418185209597](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418185209680.png)
+![image-20250418185209597](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418185209680.png)
 
 但若要实现这种并行发送模式, 就需要对发送和接收缓冲区进行管理, 从而支持这种一次发送多份报文的能力.
 
@@ -9026,19 +9026,19 @@ TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两�
 
 我们可以先简单地把发送缓冲区分为四个部分, 已发送已确认(可被覆写), 已发送未确认, 待发送, 其它
 
-![image-20250418191204643](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418191204713.png)
+![image-20250418191204643](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418191204713.png)
 
 已发送已确认, 那就意味着对方收到了其中的数据, 对于这片区域来说, 就可以直接被用户新传下来的数据覆写, 或者说, 这个区域中的数据实际上已经被视为无效的, 删除了, 移除的. 
 
 已发送带待确认, 可以细分成两种数据, 一种是可以发的, 另一种是已经发的, 但没有收到应答的区域, 对于这些区域来说, 其中的数据就相当于被保护着, 当其中那些已经发的数据收到了对方的应答, 它们就会被纳入"已发送已确认"的范畴. 这个区域就是我们所说的"滑动窗口"
 
-![image-20250418192041956](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418192042025.png)
+![image-20250418192041956](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418192042025.png)
 
 滑动窗口是可以直接向对方发的数据, 所以它的大小, 实际上就是对方接收窗口的大小.
 
 滑动窗口的划分是通过下标来进行说明的, 我们知道缓冲区可以视为一个字符数组, 所以里面的每个字节都有其下标, 所以我们就可以用两个下标(指针)来描述滑动窗口的范围.
 
-![image-20250418192800660](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250418192800733.png)
+![image-20250418192800660](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250418192800733.png)
 
 将来如果对方的接受能力变大了, 那就可以把`win_end`往后移, 这也是一种滑动.
 
@@ -9048,15 +9048,15 @@ TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两�
 
 为了有效的解决TCP网络串行通信效率低下的问题. 
 
-![image-20250419151654724](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419151654846.png)
+![image-20250419151654724](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419151654846.png)
 
 我们引入了并行发送这种方式
 
-![image-20250419151733251](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419151733350.png)
+![image-20250419151733251](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419151733350.png)
 
 我们知道, 应用层的报文实际上被存放在TCP的发送缓冲区中, 我们通过指针对发送缓冲区进行区域划分, 可以将其分为,
 
-![image-20250419152032237](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419152032308.png)
+![image-20250419152032237](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419152032308.png)
 
 已经收到应答的, 可被覆写的区域(图中的1001下标之前), 可以直接立刻发送或者说已经发送过但没有收到应答的滑动窗口(1001到5001), 还不能直接发送数据的区域(5001到某个位置), 没有用户数据的"空"区域(接着"某个位置"到末尾)
 
@@ -9066,39 +9066,39 @@ TCP协议规定,主动关闭连接的一方要处于`TIME_WAIT`状态,等待两�
 
 下面我们探讨第一个话题:   滑动窗口是怎么应对`ACK`丢包的
 
-![image-20250419161744872](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419161744957.png)
+![image-20250419161744872](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419161744957.png)
 
-![image-20250419161825724](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419161825824.png)
+![image-20250419161825724](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419161825824.png)
 
 当对方实际接收到全部报文, 但对应的`ACK`应答丢包了, TCP会作何反应?
 
 其实很简单, 在上图中, 尽管`A`未收到确认序号未`6001`的`ACK`, 但它收到了确认序号`8001`的`ACK`, 我们之前说过, 确认序号如果是`X`, 那就表示`X`前面的序号对端都收到了, 所以对于这种情况, 滑动窗口的起始指针, 就是直接移到收到的最后一个`ACK`的确认序号, 即`8001`的位置.(先不考虑滑动窗口的末尾指针移动)
 
-![image-20250419164130857](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419164130938.png)
+![image-20250419164130857](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419164130938.png)
 
 如果是`8001`的这个`ACK`丢了, 那没办法, `A`只能认为`B`收到了`7001`前面的数据, 此时对于`7001~8000`这段数据可能就会使用超时重传了.
 
-![image-20250419162929652](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419162929742.png)
+![image-20250419162929652](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419162929742.png)
 
-![image-20250419164244800](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419164244912.png)
+![image-20250419164244800](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419164244912.png)
 
 接下来我们看看真的数据丢了会怎么样
 
-![image-20250419163457366](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419163457457.png)
+![image-20250419163457366](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419163457457.png)
 
 在这里, `5001~6000`的数据丢了, 此时由于确认序号取得是最大的, 所以后面的`ACK`, 确认序号都是`5001`
 
 对于这种情况, 滑动窗口起始指针就会移到`5001`
 
-![image-20250419164418139](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419164418207.png)
+![image-20250419164418139](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419164418207.png)
 
 对于这种出现多个(三个及其以上)相同确认序号的`ACK`, `A`就会进入启动"快重传", `A`可以很明显地感知到, 一定是`5001~6000`这段数据出问题了, 此时它就不会再等超过最大传送时间再进行重传, 而是立刻先把`5001~6000`这段数据重新发送, 对于这份新发的数据来说, 由于`B`已经有了`6001~7000, 7001~8000`这两份数据, 所以会直接回应确认序号`8001`
 
-![image-20250419165652613](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419165652711.png)
+![image-20250419165652613](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419165652711.png)
 
 这还有一份更老的图
 
-![image-20250419165812385](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419165812503.png)
+![image-20250419165812385](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419165812503.png)
 
 "快重传"有前置条件, 那就是收到3个及其以上同样的确认应答, 它可以提升效率, 但如果报文数据都不够三个, 此时就只能靠"超时重传"了, 能用"快重传"就用"快重传", 实在用不了, 那也有"超时重传" 
 
@@ -9117,7 +9117,7 @@ int end = start + 对端报头中的窗口大小;
 
 不过还要注意一点, 那个`end`不能溢出, 比如对于下面这张图来说, 发出这三份数据, 也受到了对应的`ACK`, 所以起始指针变成`8001`, 但`ACK`中的窗口显示是四单位的大小, 那`end`不能移到`12001`, 而只能移到`11001`
 
-![image-20250419164418139](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419164418207.png)
+![image-20250419164418139](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419164418207.png)
 
 之前我们曾经说过"流量控制", 我们需要知道的是, "流量控制"正是由"滑动窗口"实现的, 流量控制是窗口大小的外在表现, 当对方容纳能力很大时, 就可以一次性发送很多份报文, 当对方快满了, 那就少发一点. 
 
@@ -9143,7 +9143,7 @@ int end = start + 对端报头中的窗口大小;
 
 下面我们略微小节一下
 
-![image-20250419185743236](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419185743347.png)
+![image-20250419185743236](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419185743347.png)
 
 校验和没什么好说的, 那是数学的事, 序列号既有按序到达的功能, 也有去重的功能, 确认应答在TCP中无处不在, 支持着可靠性和控制信息的传递, 超时重传没什么好讲的, 连接管理就是握手挥手. 流量控制防止发出对方放不下的报文, 效率方面, 那就有滑动窗口, 快速重传, 捎带应答, 延迟应答, 
 
@@ -9167,7 +9167,7 @@ int end = start + 对端报头中的窗口大小;
 
 TCP引入"慢启动"机制, 先发少量的数据, 探探路, 摸清当前的网络拥堵状态, 失败就重传这一个, 成功就再多发一点.
 
-![image-20250419195428373](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419195428497.png)
+![image-20250419195428373](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419195428497.png)
 
 如果一直顺利的话, 就把数据量呈指数性的增长.   
 
@@ -9183,7 +9183,7 @@ int end = (start + min(对端承载能力, 网络承载能力)) % mod(缓冲区�
 
 上面说, 拥塞窗口是指数性增加的, 诚然, 最开始基数比较小, 所以它增长的比较慢, 因此称之为"慢启动", 但随着基数不断增大, 它就会增长地越来越快,   拥塞窗口描述的是网络承载能力, 超过它的大小, 就很有可能引发网络阻塞, 并且, 网络资源即使好, 即使很健康, 也是有极限的, 所以阻塞窗口不会一直指数性的增加, 这样不符合它的实际意义, 而是到达某个值(称之为"慢启动阈值"), 就会变成线性增长, 去试探网络的最大承受能力(网络是动态变化的, 所以要试一试), 试探到了(到了这个值网络阻塞), 那就会对阈值进行下调, 并且重新进行慢启动, 这样它就会越来越难以接近到阻塞节点(到达这个点网络就阻塞),  这仅仅是从拥塞窗口的角度来考虑的, 实际上, 滑动窗口取的是反馈和拥塞最小值, 所以有可能滑动窗口一直达不到阻塞节点.
 
-![image-20250419204615823](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250419204615933.png)
+![image-20250419204615823](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250419204615933.png)
 
 慢启动阈值初始时各有不同, 但下调都是刚刚网络拥塞的一半. ("一半"是基于统计学的角度得来的, 在工程实践中, 发现这种调法效果好, 当然也有理论依据)
 
@@ -9198,7 +9198,7 @@ int end = (start + min(对端承载能力, 网络承载能力)) % mod(缓冲区�
 
 TCP是面向字节流的, UDP是面向数据报的, 为此我们可以拿UDP来比较一下, 我们知道UDP协议中有一个长度字段, 它描述了整个UDP报文段的大小, 而又由于UDP报头的长度是确定的,  所以就可以得到确定的数据大小
 
-![image-20250411163844645](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250411163844778.png)
+![image-20250411163844645](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250411163844778.png)
 
 对于UDP来说, 要么就收到一个整的报文, 要么就收不到报文, 不存在中间状态.
 
@@ -9208,7 +9208,7 @@ TCP是面向字节流的, UDP是面向数据报的, 为此我们可以拿UDP来�
 
 当表示层根据报头截出一个长度足够的字节数据之后, 
 
-![image-20250421191712869](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421191713587.png)
+![image-20250421191712869](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421191713587.png)
 
 这以前的这张图怎么截得字这么小, 在此, 我就补一个字体能看清的
 
@@ -9220,7 +9220,7 @@ TCP是面向字节流的, UDP是面向数据报的, 为此我们可以拿UDP来�
 
 就会交给应用层, 由我们的`init`进行解析
 
-![image-20250421191144672](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421191145563.png)
+![image-20250421191144672](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421191145563.png)
 
 在新图中, 解包出来的负载会交到 `protobuf` 里面, 进行实际的计算
 
@@ -9259,17 +9259,17 @@ TCP是传输控制协议, 它可能会把用户层数据拆开来发, 所以不�
 
 我们知道, `struct task_struct`中定义了一个`struct files_struct *`的指针, 该指针指向的对象中会含有一个`struct file*`的指针数组, 而`struct file`其实就是我们所说的文件描述附表, `struct file`里面有一个操作方法集指针`const struct file_operations  *`, 这个操作方法集里面就有一堆函数指针, 为应用层提供对应的操作方法, 实际上就是用指针实现多态, 把更底层的操作方法都封装成文件
 
-![image-20250421212650732](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421212651437.png)
+![image-20250421212650732](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421212651437.png)
 
 `struct file`里面还有一个`struct address_space  *`, 这就是指向文件缓冲区的指针.
 
-![image-20250421214148089](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421214148245.png)
+![image-20250421214148089](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421214148245.png)
 
 然后我们再看看连接那边
 
 连接的数据结构是`struct socket`
 
-![image-20250421214317428](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421214317674.png)
+![image-20250421214317428](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421214317674.png)
 
 然后我们还可以看到, `struct file`里面有一个`void* private_data*`, 这个指针指的就是被文件虚拟化的那些更底层的结构, 比如`struct socket`, 而`struct socket`也有`struct file*`指回去, 所以它们就可以双向寻找对方
 
@@ -9277,31 +9277,31 @@ TCP是传输控制协议, 它可能会把用户层数据拆开来发, 所以不�
 
 `struct socket`里面还有`struct proto_ops *ops`, 描述了协议的方法, 会被`file_operations  *`包装成文件的读写方法
 
-![image-20250421215541385](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421215541765.png)
+![image-20250421215541385](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421215541765.png)
 
 `struct socket`里面还有`struct sock*`, `struct sock`是连接的底层结构体, 你可以把它理解成连接的基类, 下面我们看看它的派生`struct tcp_sock, struct udp_sock`, 这两个派生类里面都封装了`struct sock`, `struct socket`指向的`struct sock`并不是纯`struct sock`, 而是在派生类`struct tcp_sock, struct udp_sock`里面的`struct sock`, 另外, 你还记得创建套接字时对其中的`family`初始化的`SOCK_STREAM, SOCK_DGRAM` , 系统就可以借助于这个字段判断这到底是在`struct tcp_sock`里面的`struct sock`还是在`struct udp_sock`里面的`struct sock`, 或者说, 是一种多态标志位.分得清自己是谁之后我们就可以通过指针强转来访问派生类的其它内容了. 另外我们还能看到`struct proto    *sk_prot_creator`, 这是`sock`的读写方法, 会被`struct proto_ops *ops`包装, 
 
 然后我们可以从`struct sock`里面找到系统内的通用报文索引, `struct sk_buff_head`, 可分为接收和读写两个结构
 
-![image-20250421224625163](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421224626180.png)
+![image-20250421224625163](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421224626180.png)
 
-![image-20250421231352133](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421231352261.png)
+![image-20250421231352133](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421231352261.png)
 
 还有`struct sk_buff_head`,  它们是对报文进行管理的结构, 你知道的, 系统里会有很多报文, 要对他们进行管理, 我们看`struct sk_buff_head`的内部定义, 可以发现这是对`struct sk_buff`的双向链表, 另外它可以认为是生产消费者模型中的那个临界资源, 所以它也有锁.
 
 `struct sk_buff`描述的就是一个个的报文
 
-![image-20250421234019190](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421234020004.png)
+![image-20250421234019190](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421234020004.png)
 
 关于`sk_buff`可以看这篇[文章](https://blog.csdn.net/qq_38107043/article/details/124160693?fromshare=blogdetail&sharetype=blogdetail&sharerId=124160693&sharerefer=PC&sharesource=venti0411&sharefrom=from_link)
 
-![image-20250421234936977](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421234937320.png)
+![image-20250421234936977](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421234937320.png)
 
 然后`struct sk_buff`里面有这四个指针
 
-![image-20250421235213708](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421235214044.png)
+![image-20250421235213708](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421235214044.png)
 
-![image-20250421235233156](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250421235233242.png)
+![image-20250421235233156](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250421235233242.png)
 
 这是什么意思呢? 就是说, 不管你是传输层, 网络层, 链路层, 都是系统的一部分, 只要你这个报文进了系统, 都会被`struct sk_buff`索引, 
 
@@ -9396,7 +9396,7 @@ head
 
 我们先来看IP协议的报头
 
-![image-20250423201909346](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250423201909432.png)
+![image-20250423201909346](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250423201909432.png)
 
 对于IP的报头来说, 我们不会像TCP那样说, 而是先把能讲的一次性说掉, 不能讲的到时候再说.
 
@@ -9419,7 +9419,7 @@ head
 
 我们之前说过, IP地址分为两个部分, 分别是网络号和主机号, 就像我们之前说的捡到学生卡的那个例子
 
-![image-20250423213052790](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250423213052922.png)
+![image-20250423213052790](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250423213052922.png)
 
 我们先不管那个`/24`, 后面我们会说, 那是子网掩码, 但现在, 我们的关注点不在这里.
 
@@ -9436,7 +9436,7 @@ head
 
 在网络发展初期, 曾经提出一种依据比特位位置进行网络号和主机号划分的方案, 把所有IP 地址分为五类, 如下图所示
 
-![image-20250423215925004](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250423215925087.png)
+![image-20250423215925004](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250423215925087.png)
 
 第一个比特位为零的, 称之为"A类网络", 其它的, 也就是第一个比特位一的, 被称为"非A类网络", "A类网络"的网络号位数为七, 所以"A类网络"一共有$2^7$个, 每个A类网络都可以容纳$2^{24}$个主机. 
 
@@ -9460,7 +9460,7 @@ head
 
 子网掩码的另一种表达方式就是`/24`这种形式, 这在之前的图上我们见过, 表示的就是前面有24个1, 也就是`255.255.255.0`
 
-![image-20250424145921558](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424145921666.png)
+![image-20250424145921558](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424145921666.png)
 
 在示例一中, 由于它的网络号是`140.252.20.0`, 主机号是低8位,  所以子网地址范围就是`140.252.20.0~140.252.20.255`, 其中的`140.252.20.0 `和`140.252.20.255`有特殊用途, 所以可容纳的主机数是254.
 
@@ -9470,7 +9470,7 @@ head
 
 子网掩码和分类划分是怎么结合起来的呢? 首先我们可能拿到了一个B网, 前面的, 由分类划分规定的前16位我们是动不了的, 但我们可以在后面的原本充当主机号的16位中做手脚, 把其中的一部分比如说其中的前12位作为我这一层的网络再划分, 这样我手上的一个B网, 就可以被拆成$2^{12}$个子网, 每个子网只能容纳14个主机, 这就相当于在我这一层对网络进行了更细的划分.
 
-![image-20250424154736791](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424154736883.png)
+![image-20250424154736791](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424154736883.png)
 
 就现在来说, ip地址已经严重不足了, 为了应对这个问题, 我们有两种方法
 
@@ -9547,15 +9547,15 @@ Windows IP 配置
 
 谈到全球, 那自然要涉及到各个国家, 实际上,  对于国家层面的ip地址分配, 是非常复杂的, 但在这里, 为了简化模型, 我们就简单地认为, 因为现在大概有200多个国家, 这样的话, 在我们的模型中, 就认为ip的前八位是国家号, 美国是`0000 0001`, 中国是`0000 0010`, 俄罗斯是`0000 0011`, 德国是`0000 0100`, ......这些国家都有自己的国际路由器可以连上国际网.这样的话, 各个国家级别的子网掩码就是8
 
-![image-20250424180137423](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424180137621.png)
+![image-20250424180137423](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424180137621.png)
 
 中国有34个省级行政区, 这样的话, 就可以依据行政区对`0000 0010`开头的ip进行再划分, 这样的话, 我们可以从剩下的24个位中取出6位作为省的区分, 这样省级的掩码就是`/14`, 它们也有各自的省级路由器
 
-![image-20250424182140993](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424182141157.png)
+![image-20250424182140993](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424182141157.png)
 
 每个省下面都有自己的若干个市, 为了区分生省下面的各个市, 我们才拿出4个比特位用来区分, 这样市一级的掩码就是`/18`, 自然它们也有自己的市路由器
 
-![image-20250424182817602](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424182817769.png)
+![image-20250424182817602](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424182817769.png)
 
 下面不继续划分了.现在假设西安市现在有一台使用公网的主机, ip地址是`0000 0010 0001 0000 0100 0000 0000 0101`,  `2.16.64.5`, 假设现在有一台美国主机, 是`1.8.128.5`, 现在, 美国的这台主机想访问西安的这台主机, 由于`2.16.64.5`不是美国ip, 所以美国的国际路由器就会把报文扔到国际网中, 中国国际路由器通过子网掩码算出来这是中国的ip, 所以就会把它转发到中国内网中, 各省的路由器也对其进行了检测, 其中陕西省的省路由器发现这是我这个省的, 所以就会把报文转发到陕西省里的子网, 然后西安市的路由器通过把这个ip和自己的子网掩码进行了按位与, 发现是自己这个市的, 于是就会转发到市里, 然后就找到了西安的这台主机.
 
@@ -9565,7 +9565,7 @@ Windows IP 配置
 
 上面我们说的都是公网ip, 实际上, 对于我们来说, 我们用的都是私网ip, 那私网和公网是怎么连起来的呢? 
 
-![image-20250424193302113](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424193302227.png)
+![image-20250424193302113](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424193302227.png)
 
 在这张图中, 我们所处的位置就是最末尾, 家用路由器下的那些`192.168.1.x`, 如果现在我们要访问公网上的一台主机`122.77.241.3`
 
@@ -9746,7 +9746,7 @@ eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
 
 局域网中的每台主机都和局域网直接相连
 
-![image-20250311195311448](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311195311538.png)
+![image-20250311195311448](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311195311538.png)
 
 在经过上面的学习之后，我们知道，局域网的通信虽然并非全程加密，但应用层的数据一般都会被加密，其它协议层则通常是明文的。因此，当其中一台主机发出报文时，除了目标主机之外（这里暂不考虑跨局域网），其它主机虽然都能感知到有报文在传输，但在链路层捕捉并解包之后，会发现这份报文并不是发给自己的，便会将其丢弃。        各个主机虽然可以知道“这份报文存在”，但因为加密发生在应用层，它们无法直接获取报文中的实际内容。或者说，虽然存在被监听的可能性，但一般并不值得专门去破解这些加密内容。
 
@@ -9760,7 +9760,7 @@ eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
 
 另外我们还要说, 随着局域网中的主机个数增多, 数据碰撞的概率就会越来越大, 甚至完全无法正常工作, 此时我们就需要引入交换机这种网络设备. 交换机可以划分碰撞域, 
 
-![image-20250311204645010](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250311204645083.png)
+![image-20250311204645010](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250311204645083.png)
 
 左边发生碰撞, 没关系, 交换机会识别到, 不把左边的报文转到右边, 没发生碰撞, 那依据Mac帧的目的Mac地址判断是否是右边的, 是, 那就转发过去, 不是, 就不转发, 这样, 原先的一个局域网就被交换机划分成了两个相对独立的部分.
 
@@ -10038,7 +10038,7 @@ traceroute to baidu.com (110.242.68.66), 30 hops max, 60 byte packets
 
 之前我们也说过, 在用户请求报文往外发送时, 每经过一个路由器, 该路由器的ip层都会对ip报文的源ip进行修改, 改成自己的, 确保响应报文来到下一跳后能够找回来, 然后再发给下一跳, 这样最终, 在出运营商的入口路由器之后, 报文中的ip就变成了运营商入口路由器的公网ip.
 
-![image-20250424193302113](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250424193302227.png)
+![image-20250424193302113](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250424193302227.png)
 
 ![image-20250427171332897](https://raw.githubusercontent.com/ListenStarsWind/images/master/2025/20250427171333029.png)
 
@@ -10118,7 +10118,7 @@ IO, 本质上就是在不同的存储介质中进行拷贝. 由于存储介质�
 
 我们把前四种IO称为同步IO
 
-![image-20250429193842127](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250429193842225.png)
+![image-20250429193842127](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250429193842225.png)
 
 我们先比较一下阻塞IO和非阻塞式IO, 就拷贝的角度来说, 它们其实没有区别.   就等待来说, 光从IO角度来说, 其实也没有区别, 但由于非阻塞IO可以中途再做一些事, 所以效率略高.
 
@@ -10126,7 +10126,7 @@ IO, 本质上就是在不同的存储介质中进行拷贝. 由于存储介质�
 
 那实际情况下, 到底主要用哪种IO呢? 其实是多路复用, 异步IO的效率不亲自控制, 而且容易逻辑混乱, 所以实际上现在已经有了很多的替代方案, 其中效率最高的, 还是多路复用, 下面我们的重点就是多路复用或者非阻塞式IO
 
-![image-20250429201657850](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250429201658125.png)
+![image-20250429201657850](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250429201658125.png)
 
 我们看到, 多路转接里面有个系统接口, 叫做`select`, 这个接口不负责拷贝, 只负责等, 可以等多个文件描述符, 在用户指定的IO事件发生后, 它就会返回, 此时因为读写事件已经发生, 所以就可以直接进行读写.
 
@@ -10818,9 +10818,9 @@ fd_set的比特位个数:1024
 
 也就是说, `fd_set`以及依赖于`fd_set`的`select`, 最多能托管1024个文件, 不过这个1024可能因为平台的不同而不同, 所以我们编码的时候, 还是使用`sizeof(fd_set)*8`的方式获得最大文件托管个数.
 
-![image-20250502171549182](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502171549314.png)
+![image-20250502171549182](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250502171549314.png)
 
-![image-20250502171610434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502171610570.png)
+![image-20250502171610434](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250502171610570.png)
 
 其中用到了`fill`初始化`fds`, `fill`和`memset`功能相同, 区别是`memset`只能以字节为单位初始化, 但`fill`可以为非字节类型, 比如这里的整型类型进行初始化. 前面两个参数是迭代器. 表示首尾.
 
@@ -11088,7 +11088,7 @@ struct pollfd {
 
 其中`fd`表示要关心的文件描述符, `events`用于告诉内核对该`fd`要关心的事件种类, `revents`用于获知该文件是否准备就绪.以前`select`对于事件信息的传输使用输入输出函数, 就像是单车道, 而对于`poll`来说, 内核读`events`, 然后检测, 把结果写回到`revents`, 于是在应用层我们就可以直接看`revents`.它是双车道, 两个车道之间不会相互干扰, 所以只要最开始把`events`初始化完后就行了, 不需要再次初始化,          并且由于它是数组, 所以理论上想设多大就设多大.
 
-![image-20250502195628492](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250502195628715.png)
+![image-20250502195628492](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250502195628715.png)
 
 我们关心读的话, 只要把对应的`events`设置成`POLLIN`就行了, 如果回来的时候发现`revents`也是`POLLIN`, 那就可以进行读了, 这些值是以比特位传参的形式进行设置的, 比如如果你既关心可读, 也关心可写, 就可以把`POLLIN | POLLOUT`传进`events`.
 
@@ -11408,7 +11408,7 @@ int epoll_ctl(int epfd, int op, int fd,
 
 在深入理解 `epoll` 之前，我们先回顾传统多路复用接口如 `select` 和 `poll` 的基本原理。
 
-![绘图1](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410111425950.png)
+![绘图1](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410111425950.png)
 
 从操作系统的分层结构来看，网络通信涉及到用户空间的应用程序、内核空间的网络协议栈，以及更底层的网卡和驱动程序。在这个模型中，应用程序通常通过文件描述符与内核交互，而这些描述符的底层可能关联的是套接字、管道或其他类型的文件。
 
@@ -13978,7 +13978,7 @@ include
 
 `LoopClient.cc`的内容是之前自定义协议的`ClientCal.cc`, `Protocols.hpp`是协议头文件, `ServerCal.hpp`是报文解析类
 
-![image-20250508232215549](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20250508232217208.png)
+![image-20250508232215549](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20250508232217208.png)
 
 我们的协议层就可以直接复用之前的
 

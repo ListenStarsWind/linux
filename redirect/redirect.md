@@ -93,7 +93,7 @@ hello linux
 
 我们现在只加一行代码：
 
-![image-20241114103351587](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141033940.png)
+![image-20241114103351587](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141033940.png)
 
 再运行一下试试？
 
@@ -108,7 +108,7 @@ fd->0
 
 再改一点。
 
-![image-20241114103626065](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141036950.png)
+![image-20241114103626065](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141036950.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean ; make
@@ -120,7 +120,7 @@ fd->0
 
 不过经过上面这两次，我们发现，系统对于文件描述符的分配规则似乎是：将最前面的空位置分配给新打开的文件。接下来让我们关闭2看看。
 
-![image-20241114104137054](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141041780.png)
+![image-20241114104137054](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141041780.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean ; make
@@ -137,7 +137,7 @@ fd->2
 
 再略微修改一下代码：
 
-![image-20241114105302516](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141053466.png)
+![image-20241114105302516](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141053466.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean ; make
@@ -154,7 +154,7 @@ hello linux
 
 现在再改动一下
 
-![image-20241114105629434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141056324.png)
+![image-20241114105629434](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141056324.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean ; make
@@ -176,7 +176,7 @@ hello linux
 
 我们知道在一个进程刚运行时，它大概是这样的：
 
-![image-20241114112234279](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141122333.png)
+![image-20241114112234279](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141122333.png)
 
 实际上我用`stdin  stdout  stderr`的名字不太好，因为这是语言里的东西，我们说的是系统，但为了大家方便理解，就这样画了。我想要表示的是`stderr and stdout`是显示器文件，`stdin`是键盘文件。
 
@@ -184,15 +184,15 @@ hello linux
 
 在上面的代码中
 
-![image-20241114105629434](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141056324.png)
+![image-20241114105629434](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141056324.png)
 
 我们首先`close(1)`，所以1的位置现在就是空了。
 
-![image-20241114113447865](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141134957.png)
+![image-20241114113447865](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141134957.png)
 
 接着我们打开了一个新文件，按照文件描述符的分配规则，`logbook.txt`的`struct file*`被加载到1中。
 
-![image-20241114113733053](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141137126.png)
+![image-20241114113733053](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141137126.png)
 
 然后我们就看到`write`傻乎乎地往1索引的文件里写信息了。
 
@@ -204,7 +204,7 @@ hello linux
 
 这时候就需要使用一个系统借口了。
 
-![image-20241114114820213](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141148368.png)
+![image-20241114114820213](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141148368.png)
 
 `dup` 是 "duplicate" 的缩写，表示“复制”或“重复”的意思。
 
@@ -214,7 +214,7 @@ hello linux
 
 至于`dup2`之后要不要立刻关闭第一个参数索引的文件，要看具体情况，不用太担心因为没有立刻关闭而浪费描述符表的位置。
 
-![image-20241114124723191](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141247715.png)
+![image-20241114124723191](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141247715.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean
@@ -247,7 +247,7 @@ hello linux
 
 也可以这样写：
 
-![image-20241114125155030](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141251485.png)
+![image-20241114125155030](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141251485.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean
@@ -276,7 +276,7 @@ hello linux
 
 上面的代码相当于输出重定向`>`，除此之外，还有追加重定向`>>`，就不写了，就是把open的方式换成`O_CREAT | O_WRONLY | O_APPEND`。接下来写写输入重定向`<`
 
-![image-20241114140748374](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141407340.png)
+![image-20241114140748374](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141407340.png)
 
 从键盘文件中尝试读取`sizeof(buffer) - 1`大小的数据，read返回读取到的字符个数，在其后面追加终止符`\0`。随后再通过`printf`打印读取到的字符，用来表示读取成功。
 
@@ -291,7 +291,7 @@ hello linux
 [wind@starry-sky Debug]$
 ```
 
-![image-20241114141445018](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141414116.png)
+![image-20241114141445018](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141414116.png)
 
 现在就是输入重定向了。
 
@@ -338,7 +338,7 @@ The quick brown fox jumps over a lazy dog.
 
 当然，现在我们不写日志，所以就随便找找信息打印看看效果。
 
-![image-20241114151511927](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141515038.png)
+![image-20241114151511927](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141515038.png)
 
 ```shell
 [wind@starry-sky Debug]$ make clean
@@ -446,10 +446,10 @@ out
 
 在大规模工程中，例如操作系统这类复杂的系统，常常通过中间层对各类对象（如硬件）进行封装、继承和多态。这种设计思路处处体现着面向对象的思想。面向对象的概念并不是人们凭空想出的，而是因为大量工程实践中需要这种方式，才促使了面向对象编程语言的诞生。因此，面向对象编程是一种趋势，是不可逆转的工程需求。
 
-![image-20241114184705193](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141847262.png)
+![image-20241114184705193](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141847262.png)
 
 最后，让我们看看内核原码
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202411141734613.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202411141734613.mp4"></video>
 
 # end

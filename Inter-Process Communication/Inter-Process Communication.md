@@ -59,7 +59,7 @@ wind     pts/0        2024-12-04 08:21 (112.26.31.132)
 
 通过这种方式，管道在逻辑上被分为单向的通信通道，之后即可按照设计进行正常的读写操作。
 
-![image-20241204101441428](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241204101441557.png)
+![image-20241204101441428](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241204101441557.png)
 
 需要注意的是，只读管道的 `struct file` 和只写管道的 `struct file` 都指向同一个内核缓冲区。换句话说，同一个文件即使以不同方式打开，其对应的 `struct file` 是独立的，但底层使用的内核缓冲区却是共享的。这样才可以保证管道的读写操作都是针对同一个缓冲区进行的，从而实现进程间通信。
 
@@ -73,7 +73,7 @@ wind     pts/0        2024-12-04 08:21 (112.26.31.132)
 
 管道的创建和打开有专门的接口，虽然 `open` 是用于普通文件的系统调用，但对于管道来说，使用的是 `pipe` 接口。`pipe` 是一个系统调用，用于创建匿名管道，并返回两个文件描述符，一个用于读，另一个用于写。该接口在 man 2 手册中有详细描述。
 
-![image-20241204105232888](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241204105233099.png)
+![image-20241204105232888](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241204105233099.png)
 
 `pipe` 系统调用有两个主要功能：一是创建管道，二是分别以只读和只写的方式打开管道。通过这个接口，用户可以创建一个匿名管道，并获得对应的读写文件描述符。`pipe` 的参数是一个大小为 2 的整型数组，调用成功后，读端文件描述符会存储在数组的第一个元素中，写端文件描述符会存储在第二个元素中。如果操作成功，`pipe` 返回 0；若操作失败，则返回 -1，并设置 `errno` 来指示错误类型。
 
@@ -174,7 +174,7 @@ int main()
 
 为了能将发送内容转换成字符串，我们需要了解一下`snprintf`，它是C语言的格式转换接口，能将其它格式的数据都转换成字符串。当然用C++的方式也是可以的。
 
-![image-20241204142403282](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241204142403474.png)
+![image-20241204142403282](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241204142403474.png)
 
 `snprintf`的第一个参数是准备承接新字符串的缓冲区，第二个参数用于描述缓冲区的大小，以免缓冲区溢出，第三个参数就是指定格式的数据。
 
@@ -465,7 +465,7 @@ file locks                      (-x) unlimited
 [wind@starry-sky pipe]$ man 7 pipe
 ```
 
-![image-20241204174211477](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241204174211640.png)
+![image-20241204174211477](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241204174211640.png)
 
 在`2.6.11`内核版本以前，是页的大小，即4096字节，之后的版本是65536字节。
 
@@ -1566,7 +1566,7 @@ else if (id == 0)
 
 我们先用指令创建一个命名管道。
 
-![image-20241209194447260](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241209194447437.png)
+![image-20241209194447260](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241209194447437.png)
 
 为什么叫`FIFO`先进先出呢？因为管道就像是队列一样，其中的字节流具有先进先出的性质。
 
@@ -1611,7 +1611,7 @@ You cannot step into the same river twice.
 
 ```
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241209203803707.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241209203803707.mp4"></video>
 
 命名管道的原理和匿名管道一致。虽说管道是一种内存级文件，但是，它仍然具有内存级别文件结构，有内存级的缓冲区，只不过存储媒介不同，也有对应的`inode`编号。虽说它是内存文件，但其文件名和inode编号的映射关系仍被记录在所在目录的data block中，这是为了保持文件系统的一致性。反正有管道路径就能找到这个管道，所以可被指代，因此可供毫无关系的进程间进行通信。
 
@@ -1755,7 +1755,7 @@ int main()
 
 代码具体内容就不说了，我们直接看看现象
 
-<video src="https://md-wind.oss-cn-nanjing.aliyuncs.com/md/20241210144419021.mp4"></video>
+<video src="https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/20241210144419021.mp4"></video>
 
 当服务端刚刚打开后，由于客户端还没运行，所以管道写端还未打开，因此服务端一直阻塞在`open`。也就是说，单纯考虑`open`对管道的打开是否阻塞取决于是否建立了完整的信道，如果只有读端，没有写端，则读端会一直阻塞在`open`，如果没有读端，只有写端，写端也会一致阻塞在`open`，当写端关闭后，读端`read`返回0，意味着文件已经读到末尾。
 

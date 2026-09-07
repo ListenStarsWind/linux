@@ -257,7 +257,7 @@ Simulate the implementation of a logic segment.
 
 如果退出码不是0，说明子进程没有达到父进程想要的结果，那就需要启动相应的应对策略。可以建立一套机制，明确每个返回码所代表的意思，C有自己的返回码标准，不过我们用的不多，一般都是自己建立一套映射机制。
 
-![image-20241031143440609](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410311434867.png)
+![image-20241031143440609](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410311434867.png)
 
 `strerror`就是C语言自带的退出码映射标准，它实际上就类似一个字符串数组，外部被封装了一下，退出码就能以下标的形式获取对应的字符串信息。
 
@@ -533,7 +533,7 @@ int main()
 
 接下来说一下`errno`，`erron`是C中的一个全局变量，当库函数结果不正确时，`errno`就会获得相应的错误码，之后结合`strerror`就能获得库函数不正确的原因。要注意的是，`erron`中保存的是上一次库函数不正确的错误码，如果之后又有库函数不正确，`erron`就会被刷新。
 
-![image-20241031152102585](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410311521686.png)
+![image-20241031152102585](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410311521686.png)
 
 ```c
 #include<stdio.h>
@@ -702,7 +702,7 @@ Segmentation fault
 
 随口说一声，缓冲区在进程地址空间的用户部分。`exit`实际上是先做完善后操作之后，再自己调用`_exit`。
 
-![image-20241031163043241](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410311630441.png)
+![image-20241031163043241](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410311630441.png)
 
 ```c
 #include<stdio.h>

@@ -106,11 +106,11 @@ hello world
 
 windows也有，是吧。搜索栏搜索环境变量。
 
-![image-20241021141111527](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410211411600.png)
+![image-20241021141111527](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410211411600.png)
 
 我这电脑装的东西有些多：
 
-![image-20241021141249018](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410211412058.png)
+![image-20241021141249018](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410211412058.png)
 
 ---------
 
@@ -191,7 +191,7 @@ OLDPWD=/home/wind/projects/EnvironmentVariables
 
 那函数怎么获取环境变量呢？有几种方法，首先是系统调用接口：
 
-![image-20241021152918915](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410211529097.png)
+![image-20241021152918915](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410211529097.png)
 
 ```cpp
 #include<iostream>
@@ -569,7 +569,7 @@ test  .  EnvironmentVariables  makefile  ..
 
 我们接下来说说`cd`，`cd`移动的是`bash`工作路径，这意味着它就是一种内建命令。下面我们通过系统接口`chdir`来创建一个会自己移动工作目录的程序，来模拟一下`bash`中的`cd`。
 
-![image-20241021180510459](https://md-wind.oss-cn-nanjing.aliyuncs.com/md/202410211805600.png)
+![image-20241021180510459](https://wind-note-image.oss-cn-shenzhen.aliyuncs.com/md/202410211805600.png)
 
 ```cpp
 #include<iostream>
